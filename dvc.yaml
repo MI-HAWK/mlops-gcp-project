@@ -1,0 +1,10 @@
+stages:
+  train:
+    cmd: python src/model/train.py
+    deps:
+      - src/model/train.py
+      - src/utils/config.py
+      - data/
+    metrics:
+      - metrics.txt:
+          cache: false
