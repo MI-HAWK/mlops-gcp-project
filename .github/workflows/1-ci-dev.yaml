@@ -40,8 +40,8 @@ jobs:
 
       - name: DVC Pull (DEV data)
         run: |
-          dvc remote add -d dev-gcs gs://${{ secrets.GCP_PROJECT }}-mlops-dev-data
-          dvc pull data/dev_dataset.csv.dvc
+          dvc remote add -d -f dev-gcs gs://${{ secrets.GCP_PROJECT }}-mlops-dev-data
+          dvc pull data/dev_train.csv.dvc data/dev_test.csv.dvc
 
       - name: Train model and generate metrics
         env:
