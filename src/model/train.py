@@ -40,10 +40,10 @@ def train_model():
         test_df[col] = le.transform(test_df[col].astype(str))
         encoders[col] = le
         
-    X_train = train_df.drop(['price', 'flight'], axis=1, errors='ignore')
+    X_train = train_df.drop(['price', 'flight', 'Unnamed: 0'], axis=1, errors='ignore')
     y_train = train_df['price']
     
-    X_test = test_df.drop(['price', 'flight'], axis=1, errors='ignore')
+    X_test = test_df.drop(['price', 'flight', 'Unnamed: 0'], axis=1, errors='ignore')
     y_test = test_df['price']
     
     mlflow.set_tracking_uri(os.environ.get("MLFLOW_TRACKING_URI", "http://localhost:5000"))
