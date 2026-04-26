@@ -52,6 +52,10 @@ def load_assets():
     except Exception as e:
         encoders = None
 
+@app.get("/")
+def root():
+    return {"status": "ok", "message": "API root. Use /health or /predict"}
+
 @app.get("/health")
 def health():
     return {"status": "healthy", "model_loaded": model is not None, "env": load_config()['env']}
