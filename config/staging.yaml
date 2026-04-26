@@ -1,0 +1,8 @@
+env: staging
+gcs_bucket: "gs://<YOUR_GCP_PROJECT_ID>-mlops-staging-data"
+model_name: "flight-pricing-model"
+dvc_remote: "staging-gcs"
+feast_offline_store_type: "gcs"
+training:
+  n_estimators: 50
+  max_depth: 10

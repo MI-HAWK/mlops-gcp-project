@@ -1,0 +1,8 @@
+[core]
+    remote = dev-gcs
+['remote "dev-gcs"']
+    url = gs://useful-citizen-493714-t0-mlops-dev-data
+['remote "staging-gcs"']
+    url = gs://useful-citizen-493714-t0-mlops-staging-data
+['remote "prod-gcs"']
+    url = gs://useful-citizen-493714-t0-mlops-prod-data

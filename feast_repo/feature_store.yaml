@@ -1,0 +1,10 @@
+# Environment-based feature store loading.
+# Depending on the ENV variable, feast can load different registries.
+project: flight_pricing
+registry: data/registry.db
+provider: local
+online_store:
+    type: sqlite
+    path: data/online_store.db
+offline_store:
+    type: file

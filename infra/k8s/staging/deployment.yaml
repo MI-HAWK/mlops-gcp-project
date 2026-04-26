@@ -1,0 +1,27 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ml-api-staging
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ml-api-staging
+  template:
+    metadata:
+      labels:
+        app: ml-api-staging
+    spec:
+      containers:
+      - name: api
+        image: <IMAGE>
+        ports:
+        - containerPort: 8080
+        env:
+        - name: ENV
+          value: "staging"
+        resources:
+          limits:
+            memory: "512Mi"
+            cpu: "500m"

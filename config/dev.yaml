@@ -1,0 +1,8 @@
+env: dev
+gcs_bucket: "gs://<YOUR_GCP_PROJECT_ID>-mlops-dev-data"
+model_name: "flight-pricing-model"
+dvc_remote: "dev-gcs"
+feast_offline_store_type: "file"
+training:
+  n_estimators: 10
+  max_depth: 5

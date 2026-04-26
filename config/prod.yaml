@@ -1,0 +1,8 @@
+env: prod
+gcs_bucket: "gs://<YOUR_GCP_PROJECT_ID>-mlops-prod-data"
+model_name: "flight-pricing-model"
+dvc_remote: "prod-gcs"
+feast_offline_store_type: "bigquery"
+training:
+  n_estimators: 100
+  max_depth: null

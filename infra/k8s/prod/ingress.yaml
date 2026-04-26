@@ -1,0 +1,21 @@
+# Demonstration of Champion-Challenger (Canary) setup
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ml-pricing-ingress
+  namespace: default
+  annotations:
+    kubernetes.io/ingress.class: "gce"
+    # Traffic splitting can be handled via Gateway API or Anthos Service Mesh for advanced scenarios.
+    # Below is a standard GCE ingress wrapper.
+spec:
+  rules:
+  - http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: ml-api-prod-svc
+            port:
+              number: 80

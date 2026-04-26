@@ -1,0 +1,27 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ml-api-prod
+  namespace: default
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: ml-api-prod
+  template:
+    metadata:
+      labels:
+        app: ml-api-prod
+    spec:
+      containers:
+      - name: api
+        image: <IMAGE>
+        ports:
+        - containerPort: 8080
+        env:
+        - name: ENV
+          value: "prod"
+        resources:
+          limits:
+            memory: "1Gi"
+            cpu: "1000m"
