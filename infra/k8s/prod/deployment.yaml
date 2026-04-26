@@ -23,7 +23,4 @@ spec:
           value: "prod"
         - name: MLFLOW_TRACKING_URI
           value: "http://136.119.241.189:5000"
-        resources:
-          limits:
-            memory: "512Mi"
-            cpu: "250m"
+
