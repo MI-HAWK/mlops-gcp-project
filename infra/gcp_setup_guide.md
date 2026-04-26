@@ -133,6 +133,7 @@ gcloud iam workload-identity-pools providers create-oidc github-provider \
     --workload-identity-pool="github-pool" \
     --display-name="GitHub Provider" \
     --attribute-mapping="google.subject=assertion.sub,attribute.actor=assertion.actor,attribute.repository=assertion.repository" \
+    --attribute-condition="assertion.repository == '${GITHUB_REPO}'" \
     --issuer-uri="https://token.actions.githubusercontent.com"
 
 # Allow GitHub Repo to impersonate the Service Account
@@ -147,10 +148,45 @@ gcloud iam workload-identity-pools providers describe github-provider \
     --format="value(name)"
 ```
 
-## 6. GitHub Actions Secrets Setup
+## 6. Central MLflow Tracking Server (Compute VM)
+
+To track experiments centrally, we will spin up a small Virtual Machine that automatically installs and runs MLflow in the background via a startup script.
+
+```bash
+# Allow web traffic to port 5000 (MLflow default port)
+gcloud compute firewall-rules create allow-mlflow-5000 \
+    --direction=INGRESS \
+    --priority=1000 \
+    --network=default \
+    --action=ALLOW \
+    --rules=tcp:5000 \
+    --source-ranges=0.0.0.0/0 \
+    --target-tags=mlflow-server
+
+# Create the VM with an automated startup script
+gcloud compute instances create mlflow-tracking-server \
+    --zone=us-central1-a \
+    --machine-type=e2-micro \
+    --tags=mlflow-server \
+    --metadata=startup-script='#! /bin/bash
+    sudo apt-get update
+    sudo apt-get install python3-pip -y
+    pip3 install mlflow --break-system-packages
+    nohup python3 -m mlflow server --host 0.0.0.0 --port 5000 > /var/log/mlflow.log 2>&1 &'
+
+# Get the Public IP Address of your new server
+gcloud compute instances describe mlflow-tracking-server \
+    --zone=us-central1-a \
+    --format='get(networkInterfaces[0].accessConfigs[0].natIP)'
+```
+
+> **Note:** Wait about 2 to 3 minutes for the VM to fully finish downloading and installing Python/MLflow in the background before trying to access the IP!
+
+## 7. GitHub Actions Secrets Setup
 In your GitHub Repository, navigate to **Settings > Secrets and variables > Actions** and add:
 - `GCP_PROJECT`: Your project ID.
-- `WIF_PROVIDER`: The output from the final `providers describe` command above.
+- `WIF_PROVIDER`: The output from the final `providers describe` command in Section 5.
 - `WIF_SERVICE_ACCOUNT`: The email of your service account (`github-actions-sa@...`).
-- `MLFLOW_TRACKING_URI`: The URI for your MLFlow setup (e.g., Databricks, or a managed VM).
-- `GITHUB_TOKEN`: Ensure workflows have Write access.
+- `MLFLOW_TRACKING_URI`: Take the IP address printed from Section 6 and write exactly: `http://<YOUR_IP_ADDRESS>:5000`
+
+*(Important Note: You do NOT need to create a secret called `GITHUB_TOKEN`. GitHub automatically provides this behind the scenes. However, you MUST give it permission to write comments: Go to **Settings > Actions > General**, scroll down to **Workflow permissions**, and select **Read and write permissions**, then click Save).*
