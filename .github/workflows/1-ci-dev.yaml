@@ -16,8 +16,9 @@ jobs:
   train-and-report:
     runs-on: ubuntu-latest
     permissions:
-      contents: 'read'
+      contents: 'write'
       id-token: 'write'
+      pull-requests: 'write'
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v3
