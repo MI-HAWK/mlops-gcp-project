@@ -59,7 +59,7 @@ def train_model():
         clf.fit(X_train, y_train)
         
         preds = clf.predict(X_test)
-        rmse = mean_squared_error(y_test, preds, squared=False)
+        rmse = mean_squared_error(y_test, preds) ** 0.5
         r2 = r2_score(y_test, preds)
         
         mlflow.log_metrics({"rmse": rmse, "r2": r2})
