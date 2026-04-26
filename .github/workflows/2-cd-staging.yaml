@@ -36,6 +36,22 @@ jobs:
       - name: Configure Docker for Artifact Registry
         run: gcloud auth configure-docker us-central1-docker.pkg.dev
 
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Train model and register to MLflow
+        env:
+          MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
+        run: |
+          dvc remote add -d -f staging-gcs gs://${{ secrets.GCP_PROJECT }}-mlops-staging-data
+          dvc pull data/staging_train.csv.dvc data/staging_test.csv.dvc
+          python src/model/train.py
+
       - name: Build Docker Image
         run: docker build -f infra/docker/Dockerfile -t us-central1-docker.pkg.dev/$PROJECT_ID/ml-repo/$IMAGE_NAME:${{ github.sha }} .
 
