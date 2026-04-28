@@ -39,7 +39,7 @@ def load_assets():
     mlflow.set_tracking_uri(os.environ.get("MLFLOW_TRACKING_URI", "http://localhost:5000"))
     model_name = f"{config['model_name']}-{env}"
     
-    # Try fetching the latest production model from registry.  
+    # Try fetching the latest production model from registry.
     try:
         model_uri = f"models:/{model_name}/latest"
         model = mlflow.sklearn.load_model(model_uri)
