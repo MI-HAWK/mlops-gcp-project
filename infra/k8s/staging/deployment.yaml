@@ -22,8 +22,24 @@ spec:
         - name: ENV
           value: "staging"
         - name: MLFLOW_TRACKING_URI
-          value: "http://136.119.241.189:5000"
+          value: "<MLFLOW_URI>"
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 15
+          periodSeconds: 10
+          failureThreshold: 3
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 15
         resources:
+          requests:
+            memory: "256Mi"
+            cpu: "250m"
           limits:
             memory: "512Mi"
             cpu: "500m"
