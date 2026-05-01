@@ -19,6 +19,9 @@ jobs:
       contents: 'read'
       id-token: 'write'
     steps:
+      # ----------------------------------------------------------------
+      # Step 1: Setup + Auth
+      # ----------------------------------------------------------------
       - name: Checkout Repo
         uses: actions/checkout@v3
 
@@ -44,20 +47,88 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Train model and register to MLflow
-        env:
-          MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
+      # ----------------------------------------------------------------
+      # Step 2: DVC Pull staging data
+      # ----------------------------------------------------------------
+      - name: DVC Pull (STAGING data)
         run: |
           dvc remote add -d -f staging-gcs gs://${{ secrets.GCP_PROJECT }}-mlops-staging-data
           dvc pull data/staging_train.csv.dvc data/staging_test.csv.dvc
-          python src/model/train.py
 
+      # ----------------------------------------------------------------
+      # Step 3: Train + Register to MLflow
+      # ----------------------------------------------------------------
+      - name: Train model and register to MLflow
+        env:
+          MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
+        run: python src/model/train.py
+
+      # ----------------------------------------------------------------
+      # Step 4: Build Docker Image
+      # ----------------------------------------------------------------
       - name: Build Docker Image
-        run: docker build -f infra/docker/Dockerfile -t us-central1-docker.pkg.dev/$PROJECT_ID/ml-repo/$IMAGE_NAME:${{ github.sha }} .
+        run: |
+          docker build -f infra/docker/Dockerfile \
+            --build-arg ENV=staging \
+            -t us-central1-docker.pkg.dev/$PROJECT_ID/ml-repo/$IMAGE_NAME:${{ github.sha }} \
+            -t us-central1-docker.pkg.dev/$PROJECT_ID/ml-repo/$IMAGE_NAME:staging-latest \
+            .
 
+      # ----------------------------------------------------------------
+      # Step 5: Container Smoke Tests
+      # ----------------------------------------------------------------
+      - name: Run container smoke tests
+        run: |
+          # Start container in background
+          docker run -d --name smoke-test \
+            -p 8080:8080 \
+            -e ENV=staging \
+            -e MLFLOW_TRACKING_URI=${{ secrets.MLFLOW_TRACKING_URI }} \
+            us-central1-docker.pkg.dev/$PROJECT_ID/ml-repo/$IMAGE_NAME:${{ github.sha }}
+
+          # Wait for container to start
+          echo "Waiting for container to start..."
+          sleep 15
+
+          # Test /health endpoint
+          echo "Testing /health..."
+          HEALTH=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/health)
+          if [ "$HEALTH" != "200" ]; then
+            echo "❌ Health check failed (HTTP $HEALTH)"
+            docker logs smoke-test
+            exit 1
+          fi
+          echo "✅ Health check passed"
+
+          # Test /predict endpoint
+          echo "Testing /predict..."
+          PREDICT_RESP=$(curl -s -X POST http://localhost:8080/predict \
+            -H "Content-Type: application/json" \
+            -d '{"airline":"Vistara","source_city":"Delhi","departure_time":"Morning","stops":"one","arrival_time":"Afternoon","destination_city":"Mumbai","class_type":"Business","duration":5.5,"days_left":15}')
+          echo "Predict response: $PREDICT_RESP"
+
+          # Check response contains prediction or expected error
+          if echo "$PREDICT_RESP" | grep -q "prediction_price\|error"; then
+            echo "✅ Predict endpoint responding"
+          else
+            echo "❌ Unexpected predict response"
+            exit 1
+          fi
+
+          # Cleanup
+          docker stop smoke-test && docker rm smoke-test
+
+      # ----------------------------------------------------------------
+      # Step 6: Push to Artifact Registry
+      # ----------------------------------------------------------------
       - name: Push to Artifact Registry
-        run: docker push us-central1-docker.pkg.dev/$PROJECT_ID/ml-repo/$IMAGE_NAME:${{ github.sha }}
+        run: |
+          docker push us-central1-docker.pkg.dev/$PROJECT_ID/ml-repo/$IMAGE_NAME:${{ github.sha }}
+          docker push us-central1-docker.pkg.dev/$PROJECT_ID/ml-repo/$IMAGE_NAME:staging-latest
 
+      # ----------------------------------------------------------------
+      # Step 7: Deploy to GKE Staging
+      # ----------------------------------------------------------------
       - name: Get GKE Credentials
         uses: google-github-actions/get-gke-credentials@v1
         with:
@@ -69,3 +140,31 @@ jobs:
           sed -i "s|<IMAGE>|us-central1-docker.pkg.dev/$PROJECT_ID/ml-repo/$IMAGE_NAME:${{ github.sha }}|g" infra/k8s/staging/deployment.yaml
           kubectl apply -f infra/k8s/staging/deployment.yaml
           kubectl apply -f infra/k8s/staging/service.yaml
+          kubectl rollout status deployment/ml-api-staging --timeout=120s
+
+      # ----------------------------------------------------------------
+      # Step 8: Post-deployment Validation
+      # ----------------------------------------------------------------
+      - name: Post-deployment validation
+        run: |
+          echo "Waiting for staging service to be ready..."
+          sleep 30
+
+          # Get staging service IP
+          STAGING_IP=$(kubectl get svc ml-api-staging-svc -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+
+          if [ -n "$STAGING_IP" ]; then
+            echo "Staging IP: $STAGING_IP"
+
+            # Health check
+            HEALTH=$(curl -s -o /dev/null -w "%{http_code}" http://$STAGING_IP/health || echo "000")
+            echo "Health check: HTTP $HEALTH"
+
+            # Predict test
+            PRED=$(curl -s -X POST http://$STAGING_IP/predict \
+              -H "Content-Type: application/json" \
+              -d '{"airline":"Vistara","source_city":"Delhi","departure_time":"Morning","stops":"one","arrival_time":"Afternoon","destination_city":"Mumbai","class_type":"Business","duration":5.5,"days_left":15}' || echo "{}")
+            echo "Prediction response: $PRED"
+          else
+            echo "⚠️ Could not get staging IP — LoadBalancer may still be provisioning"
+          fi

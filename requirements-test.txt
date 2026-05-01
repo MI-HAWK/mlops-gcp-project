@@ -1,0 +1,4 @@
+# Test-only dependencies — installed in CI, not in production Docker image
+pytest>=7.4.0
+pytest-cov>=4.1.0
+httpx>=0.25.0

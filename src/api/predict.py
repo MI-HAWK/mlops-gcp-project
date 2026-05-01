@@ -1,4 +1,5 @@
 import os
+import time
 import joblib
 import pandas as pd
 from fastapi import FastAPI
@@ -14,6 +15,15 @@ app = FastAPI()
 # Global variables to hold the loaded model and encoders
 model = None
 encoders = None
+model_version_info = {}
+
+# Metrics tracking for champion/challenger
+request_metrics = {
+    "total_requests": 0,
+    "errors": 0,
+    "latencies": [],
+    "predictions": [],
+}
 
 class PredictionRequest(BaseModel):
     airline: str
@@ -28,25 +38,32 @@ class PredictionRequest(BaseModel):
 
 @app.on_event("startup")
 def load_assets():
-    global model, encoders
+    global model, encoders, model_version_info
     config = load_config()
     env = config['env']
-    
+
+    # Determine model version from env var (for champion/challenger)
+    model_role = os.environ.get("MODEL_VERSION", "latest")
+
     # In a full Feast implementation, we'd pull features from the online store.
     # Here we are relying on direct API payload for prediction to simplify the API structure.
-    
+
     # Load MLflow tracking
     mlflow.set_tracking_uri(os.environ.get("MLFLOW_TRACKING_URI", "http://localhost:5000"))
     model_name = f"{config['model_name']}-{env}"
-    
-    # Try fetching the latest production model from registry.
+
+    # Try fetching the model from registry.
     try:
-        model_uri = f"models:/{model_name}/latest"
+        if model_role in ("champion", "challenger"):
+            model_uri = f"models:/{model_name}@{model_role}"
+        else:
+            model_uri = f"models:/{model_name}/latest"
         model = mlflow.sklearn.load_model(model_uri)
+        model_version_info = {"name": model_name, "role": model_role, "uri": model_uri}
     except Exception as e:
         print(f"Warning: could not load model from MLflow: {e}")
         model = None
-        
+
     try:
         encoders = joblib.load("models/encoders.joblib")
     except Exception as e:
@@ -60,11 +77,35 @@ def root():
 def health():
     return {"status": "healthy", "model_loaded": model is not None, "env": load_config()['env']}
 
+@app.get("/ready")
+def ready():
+    """Kubernetes readiness probe — returns 200 only if model is loaded."""
+    if model is not None and encoders is not None:
+        return {"status": "ready", "model_version": model_version_info}
+    return {"status": "not_ready"}, 503
+
+@app.get("/metrics")
+def metrics():
+    """Expose request metrics for champion/challenger comparison."""
+    lats = request_metrics["latencies"]
+    return {
+        "model_version": model_version_info,
+        "total_requests": request_metrics["total_requests"],
+        "errors": request_metrics["errors"],
+        "avg_latency_ms": round(sum(lats) / len(lats), 2) if lats else 0,
+        "p95_latency_ms": round(sorted(lats)[int(len(lats)*0.95)] if lats else 0, 2),
+        "avg_prediction": round(sum(request_metrics["predictions"]) / len(request_metrics["predictions"]), 2) if request_metrics["predictions"] else 0,
+    }
+
 @app.post("/predict")
 def predict(req: PredictionRequest):
+    start_time = time.time()
+    request_metrics["total_requests"] += 1
+
     if model is None or encoders is None:
+        request_metrics["errors"] += 1
         return {"error": "Model or encoders not loaded properly"}
-        
+
     # Format exactly as pandas DF expected by model
     df = pd.DataFrame([{
         "airline": req.airline,
@@ -77,7 +118,7 @@ def predict(req: PredictionRequest):
         "duration": req.duration,
         "days_left": req.days_left
     }])
-    
+
     # Apply encoders
     for col, enc in encoders.items():
         if col in df.columns:
@@ -85,7 +126,18 @@ def predict(req: PredictionRequest):
             try:
                 df[col] = enc.transform(df[col].astype(str))
             except ValueError:
+                request_metrics["errors"] += 1
                 return {"error": f"Unknown value in column {col}"}
-                
+
     pred = model.predict(df)[0]
+    elapsed = (time.time() - start_time) * 1000
+
+    # Track metrics
+    request_metrics["latencies"].append(elapsed)
+    request_metrics["predictions"].append(float(pred))
+    # Keep only last 1000 entries to bound memory
+    if len(request_metrics["latencies"]) > 1000:
+        request_metrics["latencies"] = request_metrics["latencies"][-1000:]
+        request_metrics["predictions"] = request_metrics["predictions"][-1000:]
+
     return {"prediction_price": float(pred)}
