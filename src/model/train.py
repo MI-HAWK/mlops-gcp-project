@@ -116,9 +116,10 @@ def train_model():
         mlflow.log_metrics(metrics)
         print(f"Metrics - RMSE: {metrics['rmse']:.2f}, R2: {metrics['r2']:.2f}")
 
-        # Save encoders locally
+        # Save encoders locally and log to MLflow so the serving container can download them
         os.makedirs("models", exist_ok=True)
         joblib.dump(encoders, "models/encoders.joblib")
+        mlflow.log_artifact("models/encoders.joblib", artifact_path="encoders")
 
         # Log model
         mlflow.sklearn.log_model(clf, "model", registered_model_name=f"{config['model_name']}-{env}")

@@ -65,9 +65,27 @@ def load_assets():
         model = None
 
     try:
-        encoders = joblib.load("models/encoders.joblib")
+        client = mlflow.tracking.MlflowClient()
+        if model_role in ("champion", "challenger"):
+            mv = client.get_model_version_by_alias(model_name, model_role)
+        else:
+            versions = client.get_latest_versions(model_name)
+            mv = versions[-1] if versions else None
+
+        if mv:
+            encoder_path = mlflow.artifacts.download_artifacts(
+                f"runs:/{mv.run_id}/encoders/encoders.joblib"
+            )
+            encoders = joblib.load(encoder_path)
+        else:
+            encoders = joblib.load("models/encoders.joblib")
     except Exception as e:
-        encoders = None
+        print(f"Warning: could not load encoders from MLflow ({e}), trying local path...")
+        try:
+            encoders = joblib.load("models/encoders.joblib")
+        except Exception as e2:
+            print(f"Warning: could not load encoders locally: {e2}")
+            encoders = None
 
 @app.get("/")
 def root():
