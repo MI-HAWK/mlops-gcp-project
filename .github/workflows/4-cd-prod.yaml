@@ -117,6 +117,12 @@ jobs:
           cluster_name: ${{ env.CLUSTER }}
           location: ${{ env.REGION }}-a
 
+      - name: Upsert MLflow ConfigMap
+        run: |
+          kubectl create configmap mlflow-config \
+            --from-literal=MLFLOW_TRACKING_URI=${{ secrets.MLFLOW_TRACKING_URI }} \
+            --dry-run=client -o yaml | kubectl apply -f -
+
       - name: Deploy Champion-Challenger Setup
         run: |
           # Update challenger image
