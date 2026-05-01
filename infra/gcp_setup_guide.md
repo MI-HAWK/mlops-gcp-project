@@ -133,17 +133,17 @@ gcloud projects add-iam-policy-binding $PROJECT_ID \
 gcloud services enable iamcredentials.googleapis.com
 
 # Create Workload Identity Pool
-gcloud iam workload-identity-pools create github-pool \
+gcloud iam workload-identity-pools create github-pool-v2 \
     --location="global" \
     --description="Pool for GitHub Actions" \
     --display-name="GitHub Actions Pool"
 
-export WORKLOAD_IDENTITY_POOL_ID=$(gcloud iam workload-identity-pools describe github-pool --location="global" --format="value(name)")
+export WORKLOAD_IDENTITY_POOL_ID=$(gcloud iam workload-identity-pools describe github-pool-v2 --location="global" --format="value(name)")
 
 # Create Workload Identity Provider
 gcloud iam workload-identity-pools providers create-oidc github-provider \
     --location="global" \
-    --workload-identity-pool="github-pool" \
+    --workload-identity-pool="github-pool-v2" \
     --display-name="GitHub Provider" \
     --attribute-mapping="google.subject=assertion.sub,attribute.actor=assertion.actor,attribute.repository=assertion.repository" \
     --attribute-condition="assertion.repository == '${GITHUB_REPO}'" \
@@ -157,7 +157,7 @@ gcloud iam service-accounts add-iam-policy-binding $SA_EMAIL \
 # Get the Provider ID to put in GitHub Secrets
 gcloud iam workload-identity-pools providers describe github-provider \
     --location="global" \
-    --workload-identity-pool="github-pool" \
+    --workload-identity-pool="github-pool-v2" \
     --format="value(name)"
 ```
 
