@@ -133,17 +133,17 @@ gcloud projects add-iam-policy-binding $PROJECT_ID \
 gcloud services enable iamcredentials.googleapis.com
 
 # Create Workload Identity Pool
-gcloud iam workload-identity-pools create github-pool-v2 \
+gcloud iam workload-identity-pools create github-pool-v3 \
     --location="global" \
     --description="Pool for GitHub Actions" \
     --display-name="GitHub Actions Pool"
 
-export WORKLOAD_IDENTITY_POOL_ID=$(gcloud iam workload-identity-pools describe github-pool-v2 --location="global" --format="value(name)")
+export WORKLOAD_IDENTITY_POOL_ID=$(gcloud iam workload-identity-pools describe github-pool-v3 --location="global" --format="value(name)")
 
 # Create Workload Identity Provider
 gcloud iam workload-identity-pools providers create-oidc github-provider \
     --location="global" \
-    --workload-identity-pool="github-pool-v2" \
+    --workload-identity-pool="github-pool-v3" \
     --display-name="GitHub Provider" \
     --attribute-mapping="google.subject=assertion.sub,attribute.actor=assertion.actor,attribute.repository=assertion.repository" \
     --attribute-condition="assertion.repository == '${GITHUB_REPO}'" \
@@ -157,7 +157,7 @@ gcloud iam service-accounts add-iam-policy-binding $SA_EMAIL \
 # Get the Provider ID to put in GitHub Secrets
 gcloud iam workload-identity-pools providers describe github-provider \
     --location="global" \
-    --workload-identity-pool="github-pool-v2" \
+    --workload-identity-pool="github-pool-v3" \
     --format="value(name)"
 ```
 
@@ -240,7 +240,7 @@ kubectl create configmap mlflow-config \
 >     --from-literal=MLFLOW_TRACKING_URI=http://<NEW_IP>:5000 \
 >     --dry-run=client -o yaml | kubectl apply -f -
 > ```
-> Run this on each cluster after switching contexts
+> Run this on each cluster after switching contexts.
 
 ## 9. GKE BackendConfig — Prod Ingress
 `infra/k8s/prod/ingress.yaml` references a GKE `BackendConfig` named `ml-api-backend-config` to configure health checks on the Cloud Load Balancer. Apply it to the prod cluster once, before the first prod deployment, or the ingress will fail to provision correctly.
