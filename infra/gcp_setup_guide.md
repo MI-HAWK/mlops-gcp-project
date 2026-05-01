@@ -240,7 +240,7 @@ kubectl create configmap mlflow-config \
 >     --from-literal=MLFLOW_TRACKING_URI=http://<NEW_IP>:5000 \
 >     --dry-run=client -o yaml | kubectl apply -f -
 > ```
-> Run this on each cluster after switching contexts.
+> Run this on each cluster after switching contexts
 
 ## 9. GKE BackendConfig — Prod Ingress
 `infra/k8s/prod/ingress.yaml` references a GKE `BackendConfig` named `ml-api-backend-config` to configure health checks on the Cloud Load Balancer. Apply it to the prod cluster once, before the first prod deployment, or the ingress will fail to provision correctly.
