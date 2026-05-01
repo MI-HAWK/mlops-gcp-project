@@ -177,6 +177,7 @@ gcloud compute firewall-rules create allow-mlflow-5000 \
     --source-ranges=0.0.0.0/0 \
     --target-tags=mlflow-server
 
+# Trying to add port 80 to firewall rule manually as it is called later
 # Create the VM with an automated startup script
 gcloud compute instances create mlflow-tracking-server \
     --zone=us-central1-a \
