@@ -1,0 +1,165 @@
+name: CI - Production Validation (develop → main)
+
+on:
+  pull_request:
+    branches:
+      - main
+
+env:
+  ENV: prod
+
+jobs:
+  validate-for-production:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: 'write'
+      id-token: 'write'
+      pull-requests: 'write'
+    steps:
+      # ----------------------------------------------------------------
+      # Step 1: Setup
+      # ----------------------------------------------------------------
+      - name: Checkout Repo
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install -r requirements-test.txt
+          pip install scipy
+          npm install -g @dvcorg/cml
+
+      - name: Authenticate GCP
+        uses: google-github-actions/auth@v1
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+
+      # ----------------------------------------------------------------
+      # Step 2: Data
+      # ----------------------------------------------------------------
+      - name: DVC Pull (PROD data)
+        run: |
+          dvc remote add -d -f prod-gcs gs://${{ secrets.GCP_PROJECT }}-mlops-prod-data
+          dvc pull data/prod_train.csv.dvc data/prod_test.csv.dvc
+          # Also pull dev data for drift comparison
+          dvc remote add -f dev-gcs gs://${{ secrets.GCP_PROJECT }}-mlops-dev-data
+          dvc pull data/dev_train.csv.dvc -r dev-gcs || true
+
+      # ----------------------------------------------------------------
+      # Step 3: Full Test Suite
+      # ----------------------------------------------------------------
+      - name: Run Full Test Suite with Coverage
+        run: |
+          pytest tests/ -v --cov=src --cov-report=term-missing --cov-report=xml:reports/coverage.xml --junitxml=reports/all-tests.xml
+
+      # ----------------------------------------------------------------
+      # Step 4: Schema Validation
+      # ----------------------------------------------------------------
+      - name: Schema Validation
+        run: |
+          echo "Validating prod training data schema..."
+          python -m src.utils.schema data/prod_train.csv
+          echo "Validating prod test data schema..."
+          python -m src.utils.schema data/prod_test.csv
+
+      # ----------------------------------------------------------------
+      # Step 5: Model Drift Check
+      # ----------------------------------------------------------------
+      - name: Model Drift Check (PSI)
+        run: |
+          echo "Running drift detection..."
+          python -c "
+          from src.utils.drift import check_drift
+          import json
+          result = check_drift('data/dev_train.csv', 'data/prod_train.csv', threshold=0.2)
+          print(json.dumps(result, indent=2))
+          with open('drift_report.json', 'w') as f:
+              json.dump(result, f, indent=2)
+          if not result['passed']:
+              print('⚠️ WARNING: Drift detected in features:', result['drifted_features'])
+              print('Drift check is advisory — not blocking the pipeline')
+          " || true
+
+      # ----------------------------------------------------------------
+      # Step 6: Train + Generate Metrics
+      # ----------------------------------------------------------------
+      - name: Fetch previous metrics
+        run: |
+          git show origin/${{ github.base_ref }}:metrics.txt > prev_metrics.txt 2>/dev/null || echo "RMSE: 0\nR2: 0" > prev_metrics.txt
+
+      - name: Train model on production data
+        env:
+          MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
+        run: python src/model/train.py
+
+      # ----------------------------------------------------------------
+      # Step 7: CML Report
+      # ----------------------------------------------------------------
+      - name: Create CML Report
+        env:
+          REPO_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "## 🚀 Production CI Report — develop → main" > report.md
+          echo "" >> report.md
+          echo "### Current Metrics (Production Data)" >> report.md
+          cat metrics.txt >> report.md
+          echo "" >> report.md
+          echo "### Previous Metrics" >> report.md
+          cat prev_metrics.txt >> report.md
+          echo "" >> report.md
+
+          # Comparison table
+          CURR_RMSE=$(grep -i "rmse" metrics.txt | head -1 | awk '{print $2}')
+          PREV_RMSE=$(grep -i "rmse" prev_metrics.txt | head -1 | awk '{print $2}')
+          CURR_R2=$(grep -i "r2" metrics.txt | head -1 | awk '{print $2}')
+          PREV_R2=$(grep -i "r2" prev_metrics.txt | head -1 | awk '{print $2}')
+
+          echo "### Comparison" >> report.md
+          echo "| Metric | Previous | Current |" >> report.md
+          echo "|--------|----------|---------|" >> report.md
+          echo "| RMSE | $PREV_RMSE | $CURR_RMSE |" >> report.md
+          echo "| R2 | $PREV_R2 | $CURR_R2 |" >> report.md
+          echo "" >> report.md
+
+          # Drift report
+          if [ -f drift_report.json ]; then
+            echo "### Drift Detection (PSI)" >> report.md
+            echo '```json' >> report.md
+            cat drift_report.json >> report.md
+            echo '```' >> report.md
+          fi
+
+          cml comment create report.md
+
+      # ----------------------------------------------------------------
+      # Step 8: Strict Quality Gate (2% threshold)
+      # ----------------------------------------------------------------
+      - name: Strict Quality Gate
+        run: |
+          CURR_RMSE=$(grep -i "rmse" metrics.txt | head -1 | awk '{print $2}')
+          PREV_RMSE=$(grep -i "rmse" prev_metrics.txt | head -1 | awk '{print $2}')
+          THRESHOLD=2  # 2% — stricter than dev
+
+          if [ "$PREV_RMSE" != "0" ] && [ -n "$PREV_RMSE" ] && [ "$PREV_RMSE" != "N/A" ]; then
+            DEGRADED=$(python3 -c "
+          prev=$PREV_RMSE; curr=$CURR_RMSE; threshold=$THRESHOLD
+          pct=((curr-prev)/prev)*100
+          print('YES' if pct > threshold else 'NO')
+          ")
+            if [ "$DEGRADED" = "YES" ]; then
+              echo "❌ RMSE degraded by more than ${THRESHOLD}% — BLOCKING production merge"
+              exit 1
+            else
+              echo "✅ Production quality gate passed"
+            fi
+          else
+            echo "⚠️ No previous metrics — skipping degradation check"
+          fi

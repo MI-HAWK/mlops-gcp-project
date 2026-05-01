@@ -1,0 +1,19 @@
+# Exclude from Docker build context
+venv/
+.venv/
+.git/
+.dvc/cache/
+.dvc/tmp/
+data/
+tests/
+*.csv
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+reports/
+*.md
+.github/
+.gitignore
+.dvcignore
+Clean_Dataset.csv

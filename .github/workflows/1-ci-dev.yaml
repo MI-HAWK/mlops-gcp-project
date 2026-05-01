@@ -1,10 +1,6 @@
 name: CI - Feature Branch Validation
 
 on:
-  push:
-    branches-ignore:
-      - main
-      - develop
   pull_request:
     branches:
       - develop
@@ -13,15 +9,20 @@ env:
   ENV: dev
 
 jobs:
-  train-and-report:
+  test-and-train:
     runs-on: ubuntu-latest
     permissions:
       contents: 'write'
       id-token: 'write'
       pull-requests: 'write'
     steps:
+      # ----------------------------------------------------------------
+      # Step 1: Setup
+      # ----------------------------------------------------------------
       - name: Checkout Repo
         uses: actions/checkout@v3
+        with:
+          fetch-depth: 0  # Full history for metric comparison
 
       - name: Setup Python
         uses: actions/setup-python@v4
@@ -31,6 +32,7 @@ jobs:
       - name: Install dependencies
         run: |
           pip install -r requirements.txt
+          pip install -r requirements-test.txt
           npm install -g @dvcorg/cml
 
       - name: Authenticate GCP
@@ -39,10 +41,38 @@ jobs:
           workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
           service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
 
+      # ----------------------------------------------------------------
+      # Step 2: Data
+      # ----------------------------------------------------------------
       - name: DVC Pull (DEV data)
         run: |
           dvc remote add -d -f dev-gcs gs://${{ secrets.GCP_PROJECT }}-mlops-dev-data
           dvc pull data/dev_train.csv.dvc data/dev_test.csv.dvc
+
+      # ----------------------------------------------------------------
+      # Step 3: Testing
+      # ----------------------------------------------------------------
+      - name: Run Unit Tests
+        run: pytest tests/unit/ -v -m unit --tb=short --junitxml=reports/unit.xml
+
+      - name: Run Integration Tests
+        run: pytest tests/integration/ -v -m integration --tb=short --junitxml=reports/integration.xml
+
+      - name: Run Sanity Tests
+        run: pytest tests/sanity/ -v -m sanity --tb=short --junitxml=reports/sanity.xml
+
+      - name: Run Full Test Suite with Coverage
+        run: |
+          pytest tests/ -v --cov=src --cov-report=term-missing --cov-report=xml:reports/coverage.xml
+          echo "### Test Coverage Report" > coverage_report.md
+          pytest tests/ --cov=src --cov-report=term-missing 2>&1 | tail -20 >> coverage_report.md || true
+
+      # ----------------------------------------------------------------
+      # Step 4: Training + Metrics
+      # ----------------------------------------------------------------
+      - name: Fetch previous metrics from base branch
+        run: |
+          git show origin/${{ github.base_ref }}:metrics.txt > prev_metrics.txt 2>/dev/null || echo "RMSE: 0\nR2: 0" > prev_metrics.txt
 
       - name: Train model and generate metrics
         env:
@@ -50,10 +80,70 @@ jobs:
         run: |
           dvc repro dvc.yaml
 
+      # ----------------------------------------------------------------
+      # Step 5: CML Report
+      # ----------------------------------------------------------------
       - name: Create CML Report
         env:
           REPO_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          echo "## Model Evaluation Report - Dev Environment" > report.md
+          echo "## 📊 Model Evaluation Report — Dev CI" > report.md
+          echo "" >> report.md
+          echo "### Current Metrics" >> report.md
           cat metrics.txt >> report.md
+          echo "" >> report.md
+          echo "### Previous Metrics (base branch)" >> report.md
+          cat prev_metrics.txt >> report.md
+          echo "" >> report.md
+
+          # Extract and compare RMSE
+          CURR_RMSE=$(grep -i "rmse" metrics.txt | head -1 | awk '{print $2}')
+          PREV_RMSE=$(grep -i "rmse" prev_metrics.txt | head -1 | awk '{print $2}')
+          echo "### Comparison" >> report.md
+          echo "| Metric | Previous | Current | Change |" >> report.md
+          echo "|--------|----------|---------|--------|" >> report.md
+
+          if [ "$PREV_RMSE" != "0" ] && [ -n "$PREV_RMSE" ]; then
+            CHANGE=$(python3 -c "prev=$PREV_RMSE; curr=$CURR_RMSE; pct=((curr-prev)/prev)*100; print(f'{pct:+.2f}%')")
+            echo "| RMSE | $PREV_RMSE | $CURR_RMSE | $CHANGE |" >> report.md
+          else
+            echo "| RMSE | N/A | $CURR_RMSE | First run |" >> report.md
+          fi
+
+          CURR_R2=$(grep -i "r2" metrics.txt | head -1 | awk '{print $2}')
+          PREV_R2=$(grep -i "r2" prev_metrics.txt | head -1 | awk '{print $2}')
+          if [ "$PREV_R2" != "0" ] && [ -n "$PREV_R2" ]; then
+            CHANGE_R2=$(python3 -c "prev=$PREV_R2; curr=$CURR_R2; pct=((curr-prev)/prev)*100; print(f'{pct:+.2f}%')")
+            echo "| R2 | $PREV_R2 | $CURR_R2 | $CHANGE_R2 |" >> report.md
+          else
+            echo "| R2 | N/A | $CURR_R2 | First run |" >> report.md
+          fi
+
+          echo "" >> report.md
+          cat coverage_report.md >> report.md || true
           cml comment create report.md
+
+      # ----------------------------------------------------------------
+      # Step 6: Quality Gate
+      # ----------------------------------------------------------------
+      - name: Quality Gate - Check for performance degradation
+        run: |
+          CURR_RMSE=$(grep -i "rmse" metrics.txt | head -1 | awk '{print $2}')
+          PREV_RMSE=$(grep -i "rmse" prev_metrics.txt | head -1 | awk '{print $2}')
+          THRESHOLD=5  # 5% degradation threshold
+
+          if [ "$PREV_RMSE" != "0" ] && [ -n "$PREV_RMSE" ] && [ "$PREV_RMSE" != "N/A" ]; then
+            DEGRADED=$(python3 -c "
+          prev=$PREV_RMSE; curr=$CURR_RMSE; threshold=$THRESHOLD
+          pct=((curr-prev)/prev)*100
+          print('YES' if pct > threshold else 'NO')
+          ")
+            if [ "$DEGRADED" = "YES" ]; then
+              echo "❌ RMSE degraded by more than ${THRESHOLD}% — blocking PR"
+              exit 1
+            else
+              echo "✅ Model performance within acceptable range"
+            fi
+          else
+            echo "⚠️ No previous metrics — skipping degradation check"
+          fi

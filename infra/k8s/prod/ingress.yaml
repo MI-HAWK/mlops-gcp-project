@@ -1,4 +1,4 @@
-# Demonstration of Champion-Challenger (Canary) setup
+# Production Ingress — routes to traffic-splitter for champion-challenger A/B testing
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -6,8 +6,8 @@ metadata:
   namespace: default
   annotations:
     kubernetes.io/ingress.class: "gce"
-    # Traffic splitting can be handled via Gateway API or Anthos Service Mesh for advanced scenarios.
-    # Below is a standard GCE ingress wrapper.
+    # Health check path for GCE Ingress
+    cloud.google.com/backend-config: '{"default": "ml-api-backend-config"}'
 spec:
   rules:
   - http:
@@ -16,6 +16,18 @@ spec:
         pathType: Prefix
         backend:
           service:
-            name: ml-api-prod-svc
+            name: traffic-splitter-svc
             port:
               number: 80
+---
+# BackendConfig for GCE health checks
+apiVersion: cloud.google.com/v1
+kind: BackendConfig
+metadata:
+  name: ml-api-backend-config
+  namespace: default
+spec:
+  healthCheck:
+    requestPath: /health
+    port: 8080
+    type: HTTP

@@ -4,6 +4,10 @@ stages:
     deps:
       - src/model/train.py
       - src/utils/config.py
+      - data/
     metrics:
       - metrics.txt:
+          cache: false
+    outs:
+      - models/encoders.joblib:
           cache: false

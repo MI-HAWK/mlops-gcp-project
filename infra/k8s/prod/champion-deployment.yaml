@@ -1,0 +1,55 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ml-api-champion
+  namespace: default
+  labels:
+    app: ml-api-prod
+    role: champion
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: ml-api-prod
+      role: champion
+  template:
+    metadata:
+      labels:
+        app: ml-api-prod
+        role: champion
+    spec:
+      containers:
+      - name: api
+        image: <CHAMPION_IMAGE>
+        ports:
+        - containerPort: 8080
+        env:
+        - name: ENV
+          value: "prod"
+        - name: MODEL_VERSION
+          value: "champion"
+        - name: MLFLOW_TRACKING_URI
+          valueFrom:
+            configMapKeyRef:
+              name: mlflow-config
+              key: MLFLOW_TRACKING_URI
+              optional: true
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 15
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 15
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "250m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"

@@ -1,3 +1,4 @@
+# Feast Feature Store configuration
 # Environment-based feature store loading.
 # Depending on the ENV variable, feast can load different registries.
 project: flight_pricing
@@ -8,3 +9,4 @@ online_store:
     path: data/online_store.db
 offline_store:
     type: file
+entity_key_serialization_version: 2
