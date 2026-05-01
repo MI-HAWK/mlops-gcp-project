@@ -4,7 +4,7 @@ This guide details the exact configurations to deploy and initialize the environ
 
 ## Ensure Initialization
 Run in **Cloud Shell or local terminal**:
-```bash
+```bash 
 gcloud auth login
 export PROJECT_ID="<YOUR_GCP_PROJECT_ID>"
 gcloud config set project $PROJECT_ID

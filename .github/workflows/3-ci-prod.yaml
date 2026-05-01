@@ -93,7 +93,7 @@ jobs:
       # ----------------------------------------------------------------
       - name: Fetch previous metrics
         run: |
-          git show origin/${{ github.base_ref }}:metrics.txt > prev_metrics.txt 2>/dev/null || echo "RMSE: 0\nR2: 0" > prev_metrics.txt
+          git show origin/${{ github.base_ref }}:metrics.txt > prev_metrics.txt 2>/dev/null || printf "RMSE: 0\nR2: 0\n" > prev_metrics.txt
 
       - name: Train model on production data
         env:
