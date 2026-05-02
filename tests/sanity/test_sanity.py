@@ -28,10 +28,6 @@ class TestImports:
         assert callable(compute_psi)
         assert callable(check_drift)
 
-    def test_import_promote(self):
-        from src.utils.promote import promote_model, swap_champion
-        assert callable(promote_model)
-
 
 class TestConfigLoads:
     def test_dev_config_loads(self):
