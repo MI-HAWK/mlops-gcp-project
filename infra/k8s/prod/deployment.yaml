@@ -4,7 +4,7 @@ metadata:
   name: ml-api-prod
   namespace: default
 spec:
-  replicas: 3
+  replicas: 2
   selector:
     matchLabels:
       app: ml-api-prod
@@ -22,5 +22,28 @@ spec:
         - name: ENV
           value: "prod"
         - name: MLFLOW_TRACKING_URI
-          value: "http://136.119.241.189:5000"
-
+          valueFrom:
+            configMapKeyRef:
+              name: mlflow-config
+              key: MLFLOW_TRACKING_URI
+              optional: true
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 8080
+          initialDelaySeconds: 15
+          periodSeconds: 10
+          failureThreshold: 3
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 15
+        resources:
+          requests:
+            memory: "1Gi"
+            cpu: "250m"
+          limits:
+            memory: "2Gi"
+            cpu: "500m"
