@@ -113,7 +113,7 @@ export SA_EMAIL="github-actions-sa@${PROJECT_ID}.iam.gserviceaccount.com"
 gcloud iam service-accounts delete $SA_EMAIL --quiet
 
 # Delete the Workload Identity Pool (this also deletes its providers)
-gcloud iam workload-identity-pools delete github-pool-v4 \
+gcloud iam workload-identity-pools delete github-pool-v6 \
     --location="global" --quiet
 ```
 

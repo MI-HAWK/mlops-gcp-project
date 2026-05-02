@@ -95,6 +95,7 @@ def metrics():
     lats = request_metrics["latencies"]
     return {
         "model": model_info,
+        "model_version": model_info.get("name", "unknown"),
         "total_requests": request_metrics["total_requests"],
         "errors": request_metrics["errors"],
         "avg_latency_ms": round(sum(lats) / len(lats), 2) if lats else 0,
