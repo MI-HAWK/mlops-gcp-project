@@ -25,19 +25,15 @@ gcloud container clusters get-credentials prod-gke-cluster \
     --zone us-central1-a
 
 # Delete the ingress first — this signals GKE to deprovision the Cloud Load Balancer
-kubectl delete ingress ml-pricing-ingress
+kubectl delete ingress ml-pricing-ingress --ignore-not-found
 
-# Delete deployments
-kubectl delete deployment ml-api-champion ml-api-challenger traffic-splitter
+# Delete the deployment and service
+kubectl delete deployment ml-api-prod --ignore-not-found
+kubectl delete service ml-api-prod-svc --ignore-not-found
 
-# Delete services
-kubectl delete service ml-api-champion-svc ml-api-challenger-svc traffic-splitter-svc
-
-# Delete configmaps
-kubectl delete configmap mlflow-config traffic-split-config nginx-splitter-config
-
-# Delete the BackendConfig CRD
-kubectl delete backendconfig ml-api-backend-config
+# Delete configmaps and BackendConfig
+kubectl delete configmap mlflow-config --ignore-not-found
+kubectl delete backendconfig ml-api-backend-config --ignore-not-found
 
 # Confirm nothing remains
 kubectl get all
@@ -49,10 +45,10 @@ gcloud container clusters get-credentials staging-gke-cluster \
     --region us-central1
 
 # Delete the LoadBalancer service first
-kubectl delete service ml-api-staging-svc
+kubectl delete service ml-api-staging-svc --ignore-not-found
 
-kubectl delete deployment ml-api-staging
-kubectl delete configmap mlflow-config
+kubectl delete deployment ml-api-staging --ignore-not-found
+kubectl delete configmap mlflow-config --ignore-not-found
 
 kubectl get all
 ```
@@ -117,7 +113,7 @@ export SA_EMAIL="github-actions-sa@${PROJECT_ID}.iam.gserviceaccount.com"
 gcloud iam service-accounts delete $SA_EMAIL --quiet
 
 # Delete the Workload Identity Pool (this also deletes its providers)
-gcloud iam workload-identity-pools delete github-pool \
+gcloud iam workload-identity-pools delete github-pool-v4 \
     --location="global" --quiet
 ```
 
@@ -146,7 +142,7 @@ gcloud storage ls | grep "mlops"
 # 6. Verify Service Accounts (should not list github-actions-sa)
 gcloud iam service-accounts list | grep "github-actions-sa"
 
-# 7. Verify Workload Identity Pools (should not list github-pool)
+# 7. Verify Workload Identity Pools (should not list github-pool-v4)
 gcloud iam workload-identity-pools list --location="global"
 
 # 8. Verify no orphaned Cloud Load Balancers remain (critical — these cost money)
