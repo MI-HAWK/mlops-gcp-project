@@ -114,12 +114,11 @@ jobs:
               echo "Scaling down old champion..."
               kubectl scale deployment/ml-api-champion --replicas=0
 
-              # Re-tag challenger as new champion
-              gcloud auth configure-docker us-central1-docker.pkg.dev
+              # Re-tag challenger digest as champion-latest (no image pull needed)
               CHALL_IMAGE=$(kubectl get deployment ml-api-challenger -o jsonpath='{.spec.template.spec.containers[0].image}')
-              docker pull $CHALL_IMAGE || true
-              docker tag $CHALL_IMAGE us-central1-docker.pkg.dev/$PROJECT_ID/ml-repo/$IMAGE_NAME:champion-latest || true
-              docker push us-central1-docker.pkg.dev/$PROJECT_ID/ml-repo/$IMAGE_NAME:champion-latest || true
+              gcloud artifacts docker tags add \
+                "$CHALL_IMAGE" \
+                us-central1-docker.pkg.dev/$PROJECT_ID/ml-repo/$IMAGE_NAME:champion-latest
             else
               echo "Scaling down challenger..."
               kubectl scale deployment/ml-api-challenger --replicas=0
