@@ -133,17 +133,17 @@ gcloud projects add-iam-policy-binding $PROJECT_ID \
 gcloud services enable iamcredentials.googleapis.com
 
 # Create Workload Identity Pool
-gcloud iam workload-identity-pools create github-pool-v4 \
+gcloud iam workload-identity-pools create github-pool-v6 \
     --location="global" \
     --description="Pool for GitHub Actions" \
     --display-name="GitHub Actions Pool"
 
-export WORKLOAD_IDENTITY_POOL_ID=$(gcloud iam workload-identity-pools describe github-pool-v4 --location="global" --format="value(name)")
+export WORKLOAD_IDENTITY_POOL_ID=$(gcloud iam workload-identity-pools describe github-pool-v6 --location="global" --format="value(name)")
 
 # Create Workload Identity Provider
 gcloud iam workload-identity-pools providers create-oidc github-provider \
     --location="global" \
-    --workload-identity-pool="github-pool-v4" \
+    --workload-identity-pool="github-pool-v6" \
     --display-name="GitHub Provider" \
     --attribute-mapping="google.subject=assertion.sub,attribute.actor=assertion.actor,attribute.repository=assertion.repository" \
     --attribute-condition="assertion.repository == '${GITHUB_REPO}'" \
@@ -157,7 +157,7 @@ gcloud iam service-accounts add-iam-policy-binding $SA_EMAIL \
 # Get the Provider ID to put in GitHub Secrets
 gcloud iam workload-identity-pools providers describe github-provider \
     --location="global" \
-    --workload-identity-pool="github-pool-v4" \
+    --workload-identity-pool="github-pool-v6" \
     --format="value(name)"
 ```
 
@@ -177,7 +177,6 @@ gcloud compute firewall-rules create allow-mlflow-5000 \
     --source-ranges=0.0.0.0/0 \
     --target-tags=mlflow-server
 
-# Trying to add port 80 to firewall rule manually as it is called later
 # Create the VM with an automated startup script
 gcloud compute instances create mlflow-tracking-server \
     --zone=us-central1-a \
@@ -209,7 +208,7 @@ In your **GitHub Repository**, navigate to **Settings > Secrets and variables > 
 ---
 
 ## 8. Kubernetes ConfigMap — Prod and Staging Clusters
-The champion and challenger deployments read `MLFLOW_TRACKING_URI` from a Kubernetes ConfigMap named `mlflow-config`. Create it in both clusters after the MLflow VM is running and you have its IP from Section 6.
+The prod and staging deployments read `MLFLOW_TRACKING_URI` from a Kubernetes ConfigMap named `mlflow-config`. The CD workflows upsert this ConfigMap automatically on every deploy, but you should create it once manually before the first deployment so it is available immediately.
 
 ### Prod Cluster
 Run in **Cloud Shell or local terminal**:
@@ -244,34 +243,23 @@ kubectl create configmap mlflow-config \
 > Run this on each cluster after switching contexts.
 
 ## 9. GKE BackendConfig — Prod Ingress
-`infra/k8s/prod/ingress.yaml` references a GKE `BackendConfig` named `ml-api-backend-config` to configure health checks on the Cloud Load Balancer. Apply it to the prod cluster once, before the first prod deployment, or the ingress will fail to provision correctly.
+`infra/k8s/prod/ingress.yaml` includes a `BackendConfig` resource that configures health checks on the Cloud Load Balancer. It is applied automatically by CD-prod as part of `kubectl apply -f infra/k8s/prod/ingress.yaml`. No manual step is needed — this note is here for reference only.
 
-Run in **Cloud Shell or local terminal** (with prod cluster credentials active from the previous section):
+The BackendConfig configures GCE to probe `/health` on port 8080. If you ever need to apply it manually before the first deployment, run:
 ```bash
-kubectl apply -f - <<'EOF'
-apiVersion: cloud.google.com/v1
-kind: BackendConfig
-metadata:
-  name: ml-api-backend-config
-spec:
-  healthCheck:
-    checkIntervalSec: 30
-    port: 8080
-    type: HTTP
-    requestPath: /health
-EOF
+# With prod cluster credentials active (from Section 8)
+kubectl apply -f infra/k8s/prod/ingress.yaml
 ```
 
 ## 10. CI/CD Pipeline Overview
-The pipeline has five GitHub Actions workflows. Pushes and PRs to specific branches trigger them automatically — no manual action is needed except for model promotion (Section 12).
+The pipeline has four GitHub Actions workflows. Pushes and PRs to specific branches trigger them automatically.
 
 | Workflow | File | Trigger | What It Does |
 |---|---|---|---|
-| CI — Dev | `1-ci-dev.yaml` | PR → `develop` | Runs unit/integration/sanity tests, trains on dev data, enforces quality gate (RMSE ≤ 5% regression); posts CML report on PR |
+| CI — Dev | `1-ci-dev.yaml` | PR → `develop` | Runs unit/integration/sanity tests, trains on dev data, enforces quality gate (RMSE ≤ 5% regression); posts metrics report on PR |
 | CD — Staging | `2-cd-staging.yaml` | Push → `develop` | Trains on staging data, builds `flight-pricing-api` Docker image, pushes to Artifact Registry (`staging-latest` tag), deploys to `staging-gke-cluster` |
-| CI — Prod | `3-ci-prod.yaml` | PR → `main` | Full test suite + schema validation (`src.utils.schema`) + drift check (PSI ≤ 0.2, advisory) + trains on prod data + strict gate (RMSE ≤ 2%); posts CML report |
-| CD — Prod | `4-cd-prod.yaml` | Push → `main` | Registers model as `challenger` in MLflow, builds challenger image, deploys champion + challenger to `prod-gke-cluster` with 50/50 NGINX traffic split via `infra/k8s/prod/` manifests |
-| Promote Model | `5-promote-model.yaml` | Manual dispatch (GitHub UI) | Sets MLflow `champion` alias, updates `traffic-split-config` ConfigMap, restarts NGINX splitter, scales loser to 0, re-tags winning image as `champion-latest` |
+| CI — Prod | `3-ci-prod.yaml` | PR → `main` | Full test suite + schema validation + drift check (PSI ≤ 0.2, advisory) + trains on prod data + strict gate (RMSE ≤ 2%); posts metrics report on PR |
+| CD — Prod | `4-cd-prod.yaml` | Push → `main` | Builds prod image (`prod-latest` tag), smoke tests, pushes to Artifact Registry, deploys single `ml-api-prod` deployment to `prod-gke-cluster` |
 
 **Branch strategy:**
 - Work on feature branches → open PR to `develop` (triggers CI-Dev)
@@ -317,7 +305,7 @@ git checkout -b feature/initial-model
 git add -A && git commit -m "Initial model version"
 git push origin feature/initial-model
 ```
-Open a **Pull Request** on GitHub from `feature/initial-model` → `develop`. This triggers `1-ci-dev.yaml` automatically. A CML report comment appears on the PR with RMSE metrics and a comparison against the base branch. Merge the PR when the quality gate passes (green check).
+Open a **Pull Request** on GitHub from `feature/initial-model` → `develop`. This triggers `1-ci-dev.yaml` automatically. A metrics report comment appears on the PR with RMSE values and comparison against the base branch. Merge the PR when the quality gate passes (green check).
 
 ### Step 3 — Staging Deployment (automatic after merge to develop)
 Merging the PR in Step 2 triggers `2-cd-staging.yaml`. Monitor it in **GitHub → Actions tab**. It will train on staging data, build the image, and deploy to `staging-gke-cluster`. After the workflow completes:
@@ -330,51 +318,56 @@ curl http://<STAGING_LB_IP>/ready
 ```
 
 ### Step 4 — Trigger Prod CI (PR to main)
-On **GitHub**, open a Pull Request from `develop` → `main`. This triggers `3-ci-prod.yaml`. It runs schema validation, PSI drift detection (comparing prod vs dev data), and a stricter RMSE gate (≤ 2%). A CML report is posted on the PR. Merge when it passes.
+On **GitHub**, open a Pull Request from `develop` → `main`. This triggers `3-ci-prod.yaml`. It runs schema validation, PSI drift detection (comparing prod vs dev data), and a stricter RMSE gate (≤ 2%). A metrics report is posted on the PR. Merge when it passes.
 
 ### Step 5 — Prod Deployment (automatic after merge to main)
-Merging triggers `4-cd-prod.yaml`. It registers the model as `challenger` in MLflow, builds the image, and deploys the full champion-challenger setup to `prod-gke-cluster`. After it completes:
+Merging triggers `4-cd-prod.yaml`. It builds the image, runs container smoke tests, and deploys a single `ml-api-prod` deployment to `prod-gke-cluster` with a Cloud Load Balancer Ingress. After it completes:
 ```bash
 # Run in Cloud Shell or local terminal
 gcloud container clusters get-credentials prod-gke-cluster --zone us-central1-a
+
+# Check pods are Running (model download takes ~30-60s after pod starts)
+kubectl get pods -l app=ml-api-prod -w
+
 # The ingress provisions a Cloud Load Balancer — allow 2-3 minutes for an IP to appear
 kubectl get ingress ml-pricing-ingress
-curl http://<INGRESS_ADDRESS>/health
-```
-> **Note:** On the first deployment there is no prior champion image. The workflow will use the challenger image for both the champion and challenger deployments. A true A/B split activates from the second prod deployment onward.
 
-## 12. Monitor and Promote Models (Champion-Challenger)
+# Validate endpoints
+curl http://<INGRESS_ADDRESS>/health
+curl http://<INGRESS_ADDRESS>/ready
+curl -X POST http://<INGRESS_ADDRESS>/predict \
+  -H "Content-Type: application/json" \
+  -d '{"airline":"Vistara","source_city":"Delhi","departure_time":"Morning","stops":"one","arrival_time":"Afternoon","destination_city":"Mumbai","class_type":"Business","duration":5.5,"days_left":15}'
+```
+
+## 12. Monitor Prod Deployment
 
 ### Check Live Metrics
 Run in **Cloud Shell or local terminal** with prod cluster credentials active:
 ```bash
-# Forward each service locally to query /metrics without exposing them publicly
-kubectl port-forward service/ml-api-champion-svc 8081:80 &
-kubectl port-forward service/ml-api-challenger-svc 8082:80 &
+# Get the ingress IP
+kubectl get ingress ml-pricing-ingress
 
-curl http://localhost:8081/metrics   # champion: avg_latency_ms, p95_latency_ms, avg_prediction, total_requests
-curl http://localhost:8082/metrics   # challenger: same fields
+# Query the /metrics endpoint (exposes request count, latency, avg prediction)
+curl http://<INGRESS_ADDRESS>/metrics
 ```
 
-Or run the built-in comparison script **locally** (requires the port-forwards above to be active):
+Or port-forward directly to a pod without going through the ingress:
 ```bash
-python -c "
-from src.utils.compare_models import compare_models, generate_report
-result = compare_models('http://localhost:8081', 'http://localhost:8082', n_requests=20)
-print(generate_report(result))
-"
+kubectl port-forward deployment/ml-api-prod 8080:8080
+curl http://localhost:8080/metrics
+curl http://localhost:8080/ready
 ```
-The report will output a recommendation: `PROMOTE_CHALLENGER`, `NO_CHANGE`, or `INCONCLUSIVE`.
 
-### Promote via GitHub Actions
-Go to **GitHub → Actions → Promote Model → Run workflow** and fill in:
-- `winner`: `challenger` (default) or `champion`
-- `traffic_weight`: `100` to route all traffic to the winner, or a lower value for a gradual rollout (e.g. `80`)
-- `model_version`: leave blank to use the latest registered version in MLflow
-
-The workflow will:
-1. Set the MLflow `champion` alias on the winning model version (archiving the old one as `archived-v{version}`)
-2. Update the `traffic-split-config` ConfigMap with the new weights
-3. Restart the NGINX `traffic-splitter` deployment so it picks up the new ConfigMap
-4. Scale the losing deployment to 0 replicas (when `traffic_weight` is 100)
-5. Re-tag the winning Docker image as `champion-latest` in Artifact Registry
+### Re-deploy a New Model Version
+Every push to `main` triggers a full retrain and redeploy. To roll out a new model version:
+```bash
+# On your local machine — open PR develop → main as usual
+git checkout develop
+git pull origin develop
+git checkout -b feature/new-model-version
+# make changes...
+git push origin feature/new-model-version
+# Open PR: feature/new-model-version → develop, merge → then PR develop → main, merge
+```
+CD-prod will build a new image tagged with the commit SHA and `prod-latest`, and roll it out with zero-downtime (`kubectl rollout status` waits for readiness before completing).

@@ -1,4 +1,4 @@
-name: CD - Production Deployment (Champion-Challenger)
+name: CD - Production Deployment
 
 on:
   push:
@@ -48,43 +48,18 @@ jobs:
         run: pip install -r requirements.txt
 
       # ----------------------------------------------------------------
-      # Step 2: Promote Model in MLflow Registry
+      # Step 2: Build Docker Image
       # ----------------------------------------------------------------
-      - name: Set challenger alias in MLflow
-        env:
-          MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
-        run: |
-          python -c "
-          from src.utils.promote import get_latest_version, promote_model, get_champion_version
-          model_name = 'flight-pricing-model-prod'
-          latest = get_latest_version(model_name)
-          if latest:
-              promote_model(model_name, latest, 'challenger')
-              print(f'Set v{latest} as challenger')
-              try:
-                  champion = get_champion_version(model_name)
-                  print(f'Existing champion: v{champion} — leaving unchanged')
-              except Exception:
-                  promote_model(model_name, latest, 'champion')
-                  print(f'First deployment: set v{latest} as champion too')
-          else:
-              print('No model versions found — will use latest')
-          " || echo "⚠️ MLflow promotion skipped (registry may not have models yet)"
-
-      # ----------------------------------------------------------------
-      # Step 3: Build Docker Image (both champion + challenger tags)
-      # ----------------------------------------------------------------
-      - name: Build Challenger Docker Image
+      - name: Build Docker Image
         run: |
           docker build -f infra/docker/Dockerfile \
             --build-arg ENV=prod \
-            --build-arg MODEL_VERSION=challenger \
             -t us-central1-docker.pkg.dev/$PROJECT_ID/ml-repo/$IMAGE_NAME:${{ github.sha }} \
-            -t us-central1-docker.pkg.dev/$PROJECT_ID/ml-repo/$IMAGE_NAME:challenger-latest \
+            -t us-central1-docker.pkg.dev/$PROJECT_ID/ml-repo/$IMAGE_NAME:prod-latest \
             .
 
       # ----------------------------------------------------------------
-      # Step 4: Container Smoke Tests
+      # Step 3: Container Smoke Tests
       # ----------------------------------------------------------------
       - name: Container smoke tests
         run: |
@@ -94,16 +69,16 @@ jobs:
             -e MLFLOW_TRACKING_URI=${{ secrets.MLFLOW_TRACKING_URI }} \
             us-central1-docker.pkg.dev/$PROJECT_ID/ml-repo/$IMAGE_NAME:${{ github.sha }}
 
-          echo "Waiting for container to be ready..."
-          for i in $(seq 1 12); do
-            HEALTH=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/health || echo "000")
-            if [ "$HEALTH" = "200" ]; then
-              echo "✅ Container ready after $((i * 5))s"
+          echo "Waiting for container to be ready (model + encoders must load)..."
+          for i in $(seq 1 24); do
+            READY=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/ready || echo "000")
+            if [ "$READY" = "200" ]; then
+              echo "Container ready after $((i * 5))s"
               break
             fi
-            echo "Attempt $i/12: HTTP $HEALTH — waiting 5s..."
-            if [ "$i" = "12" ]; then
-              echo "❌ Container did not become ready within 60s"
+            echo "Attempt $i/24: /ready=$READY — waiting 5s..."
+            if [ "$i" = "24" ]; then
+              echo "Container model not ready within 120s"
               docker logs smoke-test
               docker stop smoke-test && docker rm smoke-test
               exit 1
@@ -113,24 +88,24 @@ jobs:
 
           HEALTH=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/health)
           if [ "$HEALTH" != "200" ]; then
-            echo "❌ Health check failed (HTTP $HEALTH)"
+            echo "Health check failed (HTTP $HEALTH)"
             docker logs smoke-test
             exit 1
           fi
-          echo "✅ Container smoke test passed"
+          echo "Container smoke test passed"
 
           docker stop smoke-test && docker rm smoke-test
 
       # ----------------------------------------------------------------
-      # Step 5: Push to Artifact Registry
+      # Step 4: Push to Artifact Registry
       # ----------------------------------------------------------------
       - name: Push to Artifact Registry
         run: |
           docker push us-central1-docker.pkg.dev/$PROJECT_ID/ml-repo/$IMAGE_NAME:${{ github.sha }}
-          docker push us-central1-docker.pkg.dev/$PROJECT_ID/ml-repo/$IMAGE_NAME:challenger-latest
+          docker push us-central1-docker.pkg.dev/$PROJECT_ID/ml-repo/$IMAGE_NAME:prod-latest
 
       # ----------------------------------------------------------------
-      # Step 6: Deploy Champion-Challenger to GKE
+      # Step 5: Deploy to GKE Prod
       # ----------------------------------------------------------------
       - name: Get GKE Credentials
         uses: google-github-actions/get-gke-credentials@v1
@@ -144,44 +119,33 @@ jobs:
             --from-literal=MLFLOW_TRACKING_URI=${{ secrets.MLFLOW_TRACKING_URI }} \
             --dry-run=client -o yaml | kubectl apply -f -
 
-      - name: Deploy Champion-Challenger Setup
+      - name: Deploy to Prod Cluster
         run: |
-          # Update challenger image
-          sed -i "s|<CHALLENGER_IMAGE>|us-central1-docker.pkg.dev/$PROJECT_ID/ml-repo/$IMAGE_NAME:${{ github.sha }}|g" infra/k8s/prod/challenger-deployment.yaml
-
-          # Champion keeps its existing image (or use champion-latest tag)
-          sed -i "s|<CHAMPION_IMAGE>|us-central1-docker.pkg.dev/$PROJECT_ID/ml-repo/$IMAGE_NAME:champion-latest|g" infra/k8s/prod/champion-deployment.yaml
-
-          # Apply all manifests
-          kubectl apply -f infra/k8s/prod/champion-deployment.yaml
-          kubectl apply -f infra/k8s/prod/champion-service.yaml
-          kubectl apply -f infra/k8s/prod/challenger-deployment.yaml
-          kubectl apply -f infra/k8s/prod/challenger-service.yaml
-          kubectl apply -f infra/k8s/prod/traffic-splitter.yaml
+          sed -i "s|<IMAGE>|us-central1-docker.pkg.dev/$PROJECT_ID/ml-repo/$IMAGE_NAME:${{ github.sha }}|g" infra/k8s/prod/deployment.yaml
+          kubectl apply -f infra/k8s/prod/deployment.yaml
+          kubectl apply -f infra/k8s/prod/service.yaml
           kubectl apply -f infra/k8s/prod/ingress.yaml
-
-          # Wait for rollout
-          kubectl rollout status deployment/ml-api-champion --timeout=120s || true
-          kubectl rollout status deployment/ml-api-challenger --timeout=120s || true
+          kubectl rollout status deployment/ml-api-prod --timeout=180s
 
       # ----------------------------------------------------------------
-      # Step 7: Post-deployment Validation
+      # Step 6: Post-deployment Validation
       # ----------------------------------------------------------------
       - name: Post-deployment validation
         run: |
-          echo "Waiting for production services..."
+          echo "Waiting for prod service to be ready..."
           sleep 30
 
-          # Check champion
-          CHAMP_IP=$(kubectl get svc ml-api-champion-svc -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo "")
-          if [ -n "$CHAMP_IP" ]; then
-            echo "Champion health: $(curl -s http://$CHAMP_IP/health)"
+          PROD_IP=$(kubectl get svc ml-api-prod-svc -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo "")
+          if [ -n "$PROD_IP" ]; then
+            echo "Prod IP: $PROD_IP"
+            HEALTH=$(curl -s -o /dev/null -w "%{http_code}" http://$PROD_IP/health || echo "000")
+            echo "Health check: HTTP $HEALTH"
+            PRED=$(curl -s -X POST http://$PROD_IP/predict \
+              -H "Content-Type: application/json" \
+              -d '{"airline":"Vistara","source_city":"Delhi","departure_time":"Morning","stops":"one","arrival_time":"Afternoon","destination_city":"Mumbai","class_type":"Business","duration":5.5,"days_left":15}' || echo "{}")
+            echo "Prediction response: $PRED"
+          else
+            echo "Could not get prod IP — LoadBalancer may still be provisioning"
           fi
 
-          # Check challenger
-          CHALL_IP=$(kubectl get svc ml-api-challenger-svc -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo "")
-          if [ -n "$CHALL_IP" ]; then
-            echo "Challenger health: $(curl -s http://$CHALL_IP/health)"
-          fi
-
-          echo "✅ Production deployment complete — champion-challenger active"
+          echo "Production deployment complete"
