@@ -1,8 +1,10 @@
+import asyncio
 import os
 import time
 import joblib
 import pandas as pd
 from fastapi import FastAPI
+from fastapi.responses import JSONResponse
 import mlflow.sklearn
 from pydantic import BaseModel
 
@@ -37,6 +39,10 @@ class PredictionRequest(BaseModel):
     days_left: int
 
 @app.on_event("startup")
+async def startup_event():
+    loop = asyncio.get_running_loop()
+    loop.run_in_executor(None, load_assets)
+
 def load_assets():
     global model, encoders, model_version_info
     config = load_config()
@@ -100,7 +106,7 @@ def ready():
     """Kubernetes readiness probe — returns 200 only if model is loaded."""
     if model is not None and encoders is not None:
         return {"status": "ready", "model_version": model_version_info}
-    return {"status": "not_ready"}, 503
+    return JSONResponse(status_code=503, content={"status": "not_ready"})
 
 @app.get("/metrics")
 def metrics():
