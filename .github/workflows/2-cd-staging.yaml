@@ -86,9 +86,23 @@ jobs:
             -e MLFLOW_TRACKING_URI=${{ secrets.MLFLOW_TRACKING_URI }} \
             us-central1-docker.pkg.dev/$PROJECT_ID/ml-repo/$IMAGE_NAME:${{ github.sha }}
 
-          # Wait for container to start
-          echo "Waiting for container to start..."
-          sleep 15
+          # Wait for container to be ready (model + encoder download can take 30-60s)
+          echo "Waiting for container to be ready..."
+          for i in $(seq 1 12); do
+            HEALTH=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/health || echo "000")
+            if [ "$HEALTH" = "200" ]; then
+              echo "✅ Container ready after $((i * 5))s"
+              break
+            fi
+            echo "Attempt $i/12: HTTP $HEALTH — waiting 5s..."
+            if [ "$i" = "12" ]; then
+              echo "❌ Container did not become ready within 60s"
+              docker logs smoke-test
+              docker stop smoke-test && docker rm smoke-test
+              exit 1
+            fi
+            sleep 5
+          done
 
           # Test /health endpoint
           echo "Testing /health..."
