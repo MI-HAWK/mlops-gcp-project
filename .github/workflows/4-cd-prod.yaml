@@ -129,6 +129,20 @@ jobs:
           docker push us-central1-docker.pkg.dev/$PROJECT_ID/ml-repo/$IMAGE_NAME:${{ github.sha }}
           docker push us-central1-docker.pkg.dev/$PROJECT_ID/ml-repo/$IMAGE_NAME:challenger-latest
 
+      - name: Bootstrap champion-latest tag (first deployment only)
+        run: |
+          EXISTS=$(gcloud artifacts docker tags list \
+            us-central1-docker.pkg.dev/$PROJECT_ID/ml-repo/$IMAGE_NAME \
+            --format="value(tag)" | grep "^champion-latest$" || true)
+          if [ -z "$EXISTS" ]; then
+            echo "champion-latest not found — creating from challenger-latest (first deployment bootstrap)"
+            gcloud artifacts docker tags add \
+              us-central1-docker.pkg.dev/$PROJECT_ID/ml-repo/$IMAGE_NAME:challenger-latest \
+              us-central1-docker.pkg.dev/$PROJECT_ID/ml-repo/$IMAGE_NAME:champion-latest
+          else
+            echo "champion-latest already exists — leaving unchanged"
+          fi
+
       # ----------------------------------------------------------------
       # Step 6: Deploy Champion-Challenger to GKE
       # ----------------------------------------------------------------
