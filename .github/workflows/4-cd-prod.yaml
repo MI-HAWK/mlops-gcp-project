@@ -55,12 +55,18 @@ jobs:
           MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
         run: |
           python -c "
-          from src.utils.promote import get_latest_version, promote_model
+          from src.utils.promote import get_latest_version, promote_model, get_champion_version
           model_name = 'flight-pricing-model-prod'
           latest = get_latest_version(model_name)
           if latest:
               promote_model(model_name, latest, 'challenger')
               print(f'Set v{latest} as challenger')
+              try:
+                  champion = get_champion_version(model_name)
+                  print(f'Existing champion: v{champion} — leaving unchanged')
+              except Exception:
+                  promote_model(model_name, latest, 'champion')
+                  print(f'First deployment: set v{latest} as champion too')
           else:
               print('No model versions found — will use latest')
           " || echo "⚠️ MLflow promotion skipped (registry may not have models yet)"
