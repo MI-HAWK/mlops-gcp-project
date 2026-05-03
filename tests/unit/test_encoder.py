@@ -11,40 +11,23 @@ class TestEncodeFeatures:
         from src.model.train import encode_features
         _, _, encoders = encode_features(sample_train_df, sample_test_df)
         assert isinstance(encoders, dict)
-        assert 'airline' in encoders
-        assert 'class' in encoders
+        assert 'ohe' in encoders
+        assert 'stops_map' in encoders
+        assert 'class_map' in encoders
 
     def test_encoded_columns_are_numeric(self, sample_train_df, sample_test_df):
-        from src.model.train import encode_features, CATEGORICAL_COLS
+        from src.model.train import encode_features
         train_enc, test_enc, _ = encode_features(sample_train_df, sample_test_df)
-        for col in CATEGORICAL_COLS:
-            assert pd.api.types.is_numeric_dtype(train_enc[col]), f"{col} not numeric in train"
-            assert pd.api.types.is_numeric_dtype(test_enc[col]), f"{col} not numeric in test"
+        for col in train_enc.columns:
+            if col not in ['flight_id', 'event_timestamp']:
+                assert pd.api.types.is_numeric_dtype(train_enc[col]), f"{col} not numeric in train"
+                assert pd.api.types.is_numeric_dtype(test_enc[col]), f"{col} not numeric in test"
 
     def test_encode_does_not_modify_original(self, sample_train_df, sample_test_df):
         from src.model.train import encode_features
         original_train = sample_train_df.copy()
         encode_features(sample_train_df, sample_test_df)
         pd.testing.assert_frame_equal(sample_train_df, original_train)
-
-    def test_encoder_roundtrip(self, sample_train_df, sample_test_df):
-        from src.model.train import encode_features
-        _, _, encoders = encode_features(sample_train_df, sample_test_df)
-        # Verify we can inverse transform
-        for col, le in encoders.items():
-            encoded = le.transform(sample_train_df[col].astype(str))
-            decoded = le.inverse_transform(encoded)
-            np.testing.assert_array_equal(decoded, sample_train_df[col].astype(str).values)
-
-    def test_custom_categorical_cols(self, sample_train_df, sample_test_df):
-        from src.model.train import encode_features
-        _, _, encoders = encode_features(
-            sample_train_df, sample_test_df,
-            categorical_cols=['airline', 'class']
-        )
-        assert len(encoders) == 2
-        assert 'airline' in encoders
-        assert 'source_city' not in encoders
 
 
 class TestComputeMetrics:
@@ -80,8 +63,12 @@ class TestSaveMetrics:
 class TestPrepareFeatures:
     def test_drops_target_and_extra_cols(self, sample_train_df):
         from src.model.train import prepare_features
+        # Give sample df columns it drops
+        sample_train_df['flight_id'] = 'AI-101'
+        sample_train_df['event_timestamp'] = pd.Timestamp.now()
         X, y = prepare_features(sample_train_df)
         assert 'price' not in X.columns
-        assert 'flight' not in X.columns
+        assert 'flight_id' not in X.columns
+        assert 'event_timestamp' not in X.columns
         assert y is not None
         assert len(y) == len(sample_train_df)

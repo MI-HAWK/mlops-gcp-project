@@ -54,7 +54,7 @@ class TestPredictEndpoint:
         resp = api_client.post("/predict", json={"airline": "Vistara"})
         assert resp.status_code == 422  # Pydantic validation error
 
-    def test_predict_unknown_category(self, api_client):
+    def test_predict_unknown_category_is_ignored(self, api_client):
         payload = {
             "airline": "UNKNOWN_AIRLINE_XYZ",
             "source_city": "Delhi",
@@ -69,8 +69,8 @@ class TestPredictEndpoint:
         resp = api_client.post("/predict", json=payload)
         assert resp.status_code == 200
         data = resp.json()
-        # Should return an error about unknown value
-        assert "error" in data
+        # Should return a prediction because OneHotEncoder(handle_unknown='ignore') handles it
+        assert "prediction_price" in data
 
     def test_predict_updates_metrics(self, api_client, valid_predict_payload):
         # Get initial metrics

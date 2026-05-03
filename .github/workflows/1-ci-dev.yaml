@@ -65,14 +65,18 @@ jobs:
         run: |
           pytest tests/ -v --cov=src --cov-report=term-missing --cov-report=xml:reports/coverage.xml
           echo "### Test Coverage Report" > coverage_report.md
+          echo '```text' >> coverage_report.md
           pytest tests/ --cov=src --cov-report=term-missing 2>&1 | tail -20 >> coverage_report.md || true
+          echo '```' >> coverage_report.md
 
       # ----------------------------------------------------------------
       # Step 4: Training + Metrics
       # ----------------------------------------------------------------
       - name: Fetch previous metrics from base branch
         run: |
-          git show origin/${{ github.base_ref }}:metrics.txt > prev_metrics.txt 2>/dev/null || printf "RMSE: 0\nR2: 0\n" > prev_metrics.txt
+          git show origin/${{ github.base_ref }}:metrics.txt > prev_metrics.txt 2>/dev/null || \
+          git show ${{ github.event.pull_request.head.sha }}^:metrics.txt > prev_metrics.txt 2>/dev/null || \
+          printf "RMSE: 0\nR2: 0\n" > prev_metrics.txt
 
       - name: Train model and generate metrics
         env:
