@@ -270,7 +270,7 @@ The pipeline has four GitHub Actions workflows. Pushes and PRs to specific branc
 ## 11. First-Time End-to-End Pipeline Run
 Follow this sequence exactly on the first run. GitHub Actions steps are fully automatic — you only trigger them by opening PRs or merging.
 
-### Step 1 — Authenticate Locally and Push Data to DVC Remotes
+### Step 1 — Authenticate Locally and Push Data to DVC Remotes 
 Run **locally** in the project root:
 ```bash
 # Allow local gcloud to access GCS on your behalf
