@@ -30,8 +30,8 @@ def create_splits(input_path="Clean_Dataset.csv", output_dir="data"):
     # STAGING dataset - 20% of train, same test
     staging_train = train_full.sample(frac=0.20, random_state=42)
     
-    # PROD dataset - 100% of train, same test
-    prod_train = train_full
+    # PROD dataset - 30% of train to fit in 7GB GitHub Action runner RAM
+    prod_train = train_full.sample(frac=0.30, random_state=42)
     
     # Save DEV datasets
     dev_train.to_csv(os.path.join(output_dir, "dev_train.csv"), index=False)
