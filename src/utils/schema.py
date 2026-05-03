@@ -5,16 +5,15 @@ Used in production CI to ensure data integrity before training.
 import pandas as pd
 
 
-# Expected schema for the raw flight pricing dataset
 EXPECTED_COLUMNS = [
-    'airline', 'flight', 'source_city', 'departure_time',
+    'airline', 'flight_id', 'source_city', 'departure_time',
     'stops', 'arrival_time', 'destination_city', 'class',
-    'duration', 'days_left', 'price'
+    'duration', 'days_left', 'price', 'event_timestamp', 'route'
 ]
 
 CATEGORICAL_COLUMNS = [
     'airline', 'source_city', 'departure_time',
-    'stops', 'arrival_time', 'destination_city', 'class'
+    'stops', 'arrival_time', 'destination_city', 'class', 'route'
 ]
 
 NUMERIC_COLUMNS = ['duration', 'days_left', 'price']
