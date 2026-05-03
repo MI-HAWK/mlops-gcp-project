@@ -20,7 +20,7 @@ class TestTrainingPipeline:
 
         # Step 1: Encode
         train_enc, test_enc, encoders = encode_features(train_df, test_df)
-        assert len(encoders) == 7  # 7 categorical columns
+        assert len(encoders) == 4  # ohe, stops_map, class_map, nominal_cols
 
         # Step 2: Prepare features
         X_train, y_train = prepare_features(train_enc)
