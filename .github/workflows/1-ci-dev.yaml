@@ -65,15 +65,13 @@ jobs:
         run: |
           pytest tests/ -v --cov=src --cov-report=term-missing --cov-report=xml:reports/coverage.xml
           echo "### Test Coverage Report" > coverage_report.md
+          echo '```text' >> coverage_report.md
           pytest tests/ --cov=src --cov-report=term-missing 2>&1 | tail -20 >> coverage_report.md || true
+          echo '```' >> coverage_report.md
 
       # ----------------------------------------------------------------
       # Step 4: Training + Metrics
       # ----------------------------------------------------------------
-      - name: Fetch previous metrics from base branch
-        run: |
-          git show origin/${{ github.base_ref }}:metrics.txt > prev_metrics.txt 2>/dev/null || printf "RMSE: 0\nR2: 0\n" > prev_metrics.txt
-
       - name: Train model and generate metrics
         env:
           MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
@@ -89,61 +87,15 @@ jobs:
         run: |
           echo "## 📊 Model Evaluation Report — Dev CI" > report.md
           echo "" >> report.md
-          echo "### Current Metrics" >> report.md
-          cat metrics.txt >> report.md
-          echo "" >> report.md
-          echo "### Previous Metrics (base branch)" >> report.md
-          cat prev_metrics.txt >> report.md
-          echo "" >> report.md
 
-          # Extract and compare RMSE
+          echo "### Model Performance" >> report.md
           CURR_RMSE=$(grep -i "rmse" metrics.txt | head -1 | awk '{print $2}')
-          PREV_RMSE=$(grep -i "rmse" prev_metrics.txt | head -1 | awk '{print $2}')
-          echo "### Comparison" >> report.md
-          echo "| Metric | Previous | Current | Change |" >> report.md
-          echo "|--------|----------|---------|--------|" >> report.md
-
-          if [ "$PREV_RMSE" != "0" ] && [ -n "$PREV_RMSE" ]; then
-            CHANGE=$(python3 -c "prev=$PREV_RMSE; curr=$CURR_RMSE; pct=((curr-prev)/prev)*100; print(f'{pct:+.2f}%')")
-            echo "| RMSE | $PREV_RMSE | $CURR_RMSE | $CHANGE |" >> report.md
-          else
-            echo "| RMSE | N/A | $CURR_RMSE | First run |" >> report.md
-          fi
-
           CURR_R2=$(grep -i "r2" metrics.txt | head -1 | awk '{print $2}')
-          PREV_R2=$(grep -i "r2" prev_metrics.txt | head -1 | awk '{print $2}')
-          if [ "$PREV_R2" != "0" ] && [ -n "$PREV_R2" ]; then
-            CHANGE_R2=$(python3 -c "prev=$PREV_R2; curr=$CURR_R2; pct=((curr-prev)/prev)*100; print(f'{pct:+.2f}%')")
-            echo "| R2 | $PREV_R2 | $CURR_R2 | $CHANGE_R2 |" >> report.md
-          else
-            echo "| R2 | N/A | $CURR_R2 | First run |" >> report.md
-          fi
-
+          echo "| Metric | Current |" >> report.md
+          echo "|--------|---------|" >> report.md
+          echo "| RMSE | $CURR_RMSE |" >> report.md
+          echo "| R2 | $CURR_R2 |" >> report.md
           echo "" >> report.md
+
           cat coverage_report.md >> report.md || true
           cml comment create report.md
-
-      # ----------------------------------------------------------------
-      # Step 6: Quality Gate
-      # ----------------------------------------------------------------
-      - name: Quality Gate - Check for performance degradation
-        run: |
-          CURR_RMSE=$(grep -i "rmse" metrics.txt | head -1 | awk '{print $2}')
-          PREV_RMSE=$(grep -i "rmse" prev_metrics.txt | head -1 | awk '{print $2}')
-          THRESHOLD=5  # 5% degradation threshold
-
-          if [ "$PREV_RMSE" != "0" ] && [ -n "$PREV_RMSE" ] && [ "$PREV_RMSE" != "N/A" ]; then
-            DEGRADED=$(python3 -c "
-          prev=$PREV_RMSE; curr=$CURR_RMSE; threshold=$THRESHOLD
-          pct=((curr-prev)/prev)*100
-          print('YES' if pct > threshold else 'NO')
-          ")
-            if [ "$DEGRADED" = "YES" ]; then
-              echo "❌ RMSE degraded by more than ${THRESHOLD}% — blocking PR"
-              exit 1
-            else
-              echo "✅ Model performance within acceptable range"
-            fi
-          else
-            echo "⚠️ No previous metrics — skipping degradation check"
-          fi

@@ -1,5 +1,5 @@
 outs:
-- md5: 7ce713f29bd85a7d2f7fcd48a655636b
-  size: 19986560
+- md5: 52d9f4829a10749d9e8b4d721c10fc79
+  size: 9530314
   hash: md5
   path: prod_train.csv

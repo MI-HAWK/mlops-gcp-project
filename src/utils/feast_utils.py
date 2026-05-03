@@ -37,6 +37,7 @@ def get_training_features(entity_df, feature_refs=None, repo_path=None):
             "flight_features:arrival_time",
             "flight_features:stops",
             "flight_features:class",
+            "flight_features:route",
         ]
 
     store = get_feast_store(repo_path)
@@ -62,6 +63,14 @@ def get_online_features(entity_dict, feature_refs=None, repo_path=None):
         feature_refs = [
             "flight_features:duration",
             "flight_features:days_left",
+            "flight_features:airline",
+            "flight_features:source_city",
+            "flight_features:destination_city",
+            "flight_features:departure_time",
+            "flight_features:arrival_time",
+            "flight_features:stops",
+            "flight_features:class",
+            "flight_features:route",
         ]
 
     store = get_feast_store(repo_path)

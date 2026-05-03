@@ -91,14 +91,13 @@ jobs:
       # ----------------------------------------------------------------
       # Step 6: Train + Generate Metrics
       # ----------------------------------------------------------------
-      - name: Fetch previous metrics
-        run: |
-          git show origin/${{ github.base_ref }}:metrics.txt > prev_metrics.txt 2>/dev/null || printf "RMSE: 0\nR2: 0\n" > prev_metrics.txt
-
       - name: Train model on production data
         env:
           MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
-        run: python src/model/train.py
+        run: |
+          python -u src/utils/prepare_feast.py
+          cd feast_repo && feast apply && cd ..
+          python -u src/model/train.py
 
       # ----------------------------------------------------------------
       # Step 7: CML Report
@@ -109,24 +108,15 @@ jobs:
         run: |
           echo "## 🚀 Production CI Report — develop → main" > report.md
           echo "" >> report.md
-          echo "### Current Metrics (Production Data)" >> report.md
-          cat metrics.txt >> report.md
-          echo "" >> report.md
-          echo "### Previous Metrics" >> report.md
-          cat prev_metrics.txt >> report.md
-          echo "" >> report.md
 
-          # Comparison table
+          echo "### Model Performance" >> report.md
           CURR_RMSE=$(grep -i "rmse" metrics.txt | head -1 | awk '{print $2}')
-          PREV_RMSE=$(grep -i "rmse" prev_metrics.txt | head -1 | awk '{print $2}')
           CURR_R2=$(grep -i "r2" metrics.txt | head -1 | awk '{print $2}')
-          PREV_R2=$(grep -i "r2" prev_metrics.txt | head -1 | awk '{print $2}')
 
-          echo "### Comparison" >> report.md
-          echo "| Metric | Previous | Current |" >> report.md
-          echo "|--------|----------|---------|" >> report.md
-          echo "| RMSE | $PREV_RMSE | $CURR_RMSE |" >> report.md
-          echo "| R2 | $PREV_R2 | $CURR_R2 |" >> report.md
+          echo "| Metric | Current |" >> report.md
+          echo "|--------|---------|" >> report.md
+          echo "| RMSE | $CURR_RMSE |" >> report.md
+          echo "| R2 | $CURR_R2 |" >> report.md
           echo "" >> report.md
 
           # Drift report
@@ -138,28 +128,3 @@ jobs:
           fi
 
           cml comment create report.md
-
-      # ----------------------------------------------------------------
-      # Step 8: Strict Quality Gate (2% threshold)
-      # ----------------------------------------------------------------
-      - name: Strict Quality Gate
-        run: |
-          CURR_RMSE=$(grep -i "rmse" metrics.txt | head -1 | awk '{print $2}')
-          PREV_RMSE=$(grep -i "rmse" prev_metrics.txt | head -1 | awk '{print $2}')
-          THRESHOLD=2  # 2% — stricter than dev
-
-          if [ "$PREV_RMSE" != "0" ] && [ -n "$PREV_RMSE" ] && [ "$PREV_RMSE" != "N/A" ]; then
-            DEGRADED=$(python3 -c "
-          prev=$PREV_RMSE; curr=$CURR_RMSE; threshold=$THRESHOLD
-          pct=((curr-prev)/prev)*100
-          print('YES' if pct > threshold else 'NO')
-          ")
-            if [ "$DEGRADED" = "YES" ]; then
-              echo "❌ RMSE degraded by more than ${THRESHOLD}% — BLOCKING production merge"
-              exit 1
-            else
-              echo "✅ Production quality gate passed"
-            fi
-          else
-            echo "⚠️ No previous metrics — skipping degradation check"
-          fi

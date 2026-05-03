@@ -133,17 +133,17 @@ gcloud projects add-iam-policy-binding $PROJECT_ID \
 gcloud services enable iamcredentials.googleapis.com
 
 # Create Workload Identity Pool
-gcloud iam workload-identity-pools create github-pool-v6 \
+gcloud iam workload-identity-pools create github-pool-v7 \
     --location="global" \
     --description="Pool for GitHub Actions" \
     --display-name="GitHub Actions Pool"
 
-export WORKLOAD_IDENTITY_POOL_ID=$(gcloud iam workload-identity-pools describe github-pool-v6 --location="global" --format="value(name)")
+export WORKLOAD_IDENTITY_POOL_ID=$(gcloud iam workload-identity-pools describe github-pool-v7 --location="global" --format="value(name)")
 
 # Create Workload Identity Provider
 gcloud iam workload-identity-pools providers create-oidc github-provider \
     --location="global" \
-    --workload-identity-pool="github-pool-v6" \
+    --workload-identity-pool="github-pool-v7" \
     --display-name="GitHub Provider" \
     --attribute-mapping="google.subject=assertion.sub,attribute.actor=assertion.actor,attribute.repository=assertion.repository" \
     --attribute-condition="assertion.repository == '${GITHUB_REPO}'" \
@@ -157,7 +157,7 @@ gcloud iam service-accounts add-iam-policy-binding $SA_EMAIL \
 # Get the Provider ID to put in GitHub Secrets
 gcloud iam workload-identity-pools providers describe github-provider \
     --location="global" \
-    --workload-identity-pool="github-pool-v6" \
+    --workload-identity-pool="github-pool-v7" \
     --format="value(name)"
 ```
 
@@ -270,7 +270,7 @@ The pipeline has four GitHub Actions workflows. Pushes and PRs to specific branc
 ## 11. First-Time End-to-End Pipeline Run
 Follow this sequence exactly on the first run. GitHub Actions steps are fully automatic — you only trigger them by opening PRs or merging.
 
-### Step 1 — Authenticate Locally and Push Data to DVC Remotes
+### Step 1 — Authenticate Locally and Push Data to DVC Remotes 
 Run **locally** in the project root:
 ```bash
 # Allow local gcloud to access GCS on your behalf
@@ -305,7 +305,7 @@ git checkout -b feature/initial-model
 git add -A && git commit -m "Initial model version"
 git push origin feature/initial-model
 ```
-Open a **Pull Request** on GitHub from `feature/initial-model` → `develop`. This triggers `1-ci-dev.yaml` automatically. A metrics report comment appears on the PR with RMSE values and comparison against the base branch. Merge the PR when the quality gate passes (green check).
+Open a **Pull Request** on GitHub from `feature/initial-model` → `develop`. This triggers `1-ci-dev.yaml` automatically. A metrics report comment appears on the PR with current RMSE and R2 values. Merge the PR when tests and validation checks pass.
 
 ### Step 3 — Staging Deployment (automatic after merge to develop)
 Merging the PR in Step 2 triggers `2-cd-staging.yaml`. Monitor it in **GitHub → Actions tab**. It will train on staging data, build the image, and deploy to `staging-gke-cluster`. After the workflow completes:
@@ -318,7 +318,7 @@ curl http://<STAGING_LB_IP>/ready
 ```
 
 ### Step 4 — Trigger Prod CI (PR to main)
-On **GitHub**, open a Pull Request from `develop` → `main`. This triggers `3-ci-prod.yaml`. It runs schema validation, PSI drift detection (comparing prod vs dev data), and a stricter RMSE gate (≤ 2%). A metrics report is posted on the PR. Merge when it passes.
+On **GitHub**, open a Pull Request from `develop` → `main`. This triggers `3-ci-prod.yaml`. It runs schema validation and PSI drift detection (comparing prod vs dev data). A metrics report is posted on the PR. Merge when tests and validation checks pass.
 
 ### Step 5 — Prod Deployment (automatic after merge to main)
 Merging triggers `4-cd-prod.yaml`. It builds the image, runs container smoke tests, and deploys a single `ml-api-prod` deployment to `prod-gke-cluster` with a Cloud Load Balancer Ingress. After it completes:

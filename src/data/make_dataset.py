@@ -6,6 +6,17 @@ def create_splits(input_path="Clean_Dataset.csv", output_dir="data"):
     print("Loading dataset...")
     df = pd.read_csv(input_path)
     
+    # Preprocessing for Feast
+    if 'flight' in df.columns:
+        df = df.rename(columns={'flight': 'flight_id'})
+    
+    # Add event_timestamp for Feast offline store compatibility
+    df['event_timestamp'] = pd.Timestamp.now(tz='UTC')
+    
+    # Add new route feature
+    if 'source_city' in df.columns and 'destination_city' in df.columns:
+        df['route'] = df['source_city'] + '_' + df['destination_city']
+    
     # Create once: Full Dataset -> Train / Test (80 / 20)
     train_full, test_fixed = train_test_split(df, test_size=0.2, random_state=42)
     
@@ -19,8 +30,8 @@ def create_splits(input_path="Clean_Dataset.csv", output_dir="data"):
     # STAGING dataset - 20% of train, same test
     staging_train = train_full.sample(frac=0.20, random_state=42)
     
-    # PROD dataset - 100% of train, same test
-    prod_train = train_full
+    # PROD dataset - 30% of train to fit in 7GB GitHub Action runner RAM
+    prod_train = train_full.sample(frac=0.30, random_state=42)
     
     # Save DEV datasets
     dev_train.to_csv(os.path.join(output_dir, "dev_train.csv"), index=False)
