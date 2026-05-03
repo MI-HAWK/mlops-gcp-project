@@ -144,7 +144,18 @@ def predict(req: PredictionRequest):
             request_metrics["errors"] += 1
             return {"error": f"Error during encoding: {str(e)}"}
 
-    pred = model.predict(df)[0]
+    if hasattr(model, 'feature_names_in_'):
+        try:
+            df = df[model.feature_names_in_]
+        except Exception as e:
+            request_metrics["errors"] += 1
+            return {"error": f"Feature mismatch: {str(e)}"}
+
+    try:
+        pred = model.predict(df)[0]
+    except Exception as e:
+        request_metrics["errors"] += 1
+        return {"error": f"Prediction failed: {str(e)}"}
     elapsed = (time.time() - start_time) * 1000
 
     request_metrics["latencies"].append(elapsed)
