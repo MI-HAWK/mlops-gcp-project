@@ -1,5 +1,4 @@
 from feast import Entity, Field, FeatureView, FileSource, ValueType
-from feast.data_format import CSVFormat
 from feast.types import Float32, Int32, String
 from datetime import timedelta
 import os
@@ -10,14 +9,13 @@ flight = Entity(name="flight", join_keys=["flight_id"], value_type=ValueType.STR
 # Determine data path from environment
 _env = os.getenv("ENV", "dev")
 _data_path = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), "..", "data", f"{_env}_train.csv")
+    os.path.join(os.path.dirname(__file__), "..", "data", f"{_env}_train.parquet")
 )
 
 # Defining the offline source
 flight_stats_source = FileSource(
     path=_data_path,
     timestamp_field="event_timestamp",
-    file_format=CSVFormat()
 )
 
 # Define feature view with ALL feature fields
