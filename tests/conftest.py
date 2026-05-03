@@ -21,9 +21,9 @@ os.environ.setdefault("ENV", "dev")
 @pytest.fixture
 def sample_flight_data():
     """Minimal flight pricing DataFrame for testing."""
-    return pd.DataFrame({
+    df = pd.DataFrame({
         'airline': ['Vistara', 'Air_India', 'Indigo', 'Vistara', 'SpiceJet'],
-        'flight': ['UK-1', 'AI-2', 'IN-3', 'UK-4', 'SJ-5'],
+        'flight_id': ['UK-1', 'AI-2', 'IN-3', 'UK-4', 'SJ-5'],
         'source_city': ['Delhi', 'Mumbai', 'Bangalore', 'Delhi', 'Kolkata'],
         'departure_time': ['Morning', 'Evening', 'Afternoon', 'Night', 'Morning'],
         'stops': ['one', 'zero', 'two_or_more', 'one', 'zero'],
@@ -34,6 +34,9 @@ def sample_flight_data():
         'days_left': [15, 3, 45, 1, 20],
         'price': [12000, 3500, 4200, 15000, 2800],
     })
+    df['event_timestamp'] = pd.Timestamp.now(tz='UTC')
+    df['route'] = df['source_city'] + '_' + df['destination_city']
+    return df
 
 
 @pytest.fixture
@@ -48,22 +51,31 @@ def sample_test_df(sample_flight_data):
 
 @pytest.fixture
 def mock_encoders():
-    """Pre-fitted LabelEncoders matching the sample data."""
-    cols = {
-        'airline': ['Air_India', 'Indigo', 'SpiceJet', 'Vistara'],
-        'source_city': ['Bangalore', 'Delhi', 'Kolkata', 'Mumbai'],
-        'departure_time': ['Afternoon', 'Evening', 'Morning', 'Night'],
-        'stops': ['one', 'two_or_more', 'zero'],
-        'arrival_time': ['Afternoon', 'Evening', 'Morning', 'Night'],
-        'destination_city': ['Chennai', 'Delhi', 'Hyderabad', 'Mumbai'],
-        'class': ['Business', 'Economy'],
+    """Mock the new encoders layout."""
+    from sklearn.preprocessing import OneHotEncoder
+    import pandas as pd
+    
+    stops_map = {'zero': 0, 'one': 1, 'two_or_more': 2}
+    class_map = {'Economy': 0, 'Business': 1}
+    
+    nom_cols = ['airline', 'source_city', 'destination_city', 'departure_time', 'arrival_time', 'route']
+    df = pd.DataFrame({
+        'airline': ['Air_India', 'Indigo'],
+        'source_city': ['Bangalore', 'Delhi'],
+        'destination_city': ['Chennai', 'Delhi'],
+        'departure_time': ['Afternoon', 'Evening'],
+        'arrival_time': ['Afternoon', 'Evening'],
+        'route': ['Bangalore_Chennai', 'Delhi_Delhi']
+    })
+    ohe = OneHotEncoder(handle_unknown='ignore', sparse_output=False)
+    ohe.fit(df)
+    
+    return {
+        'ohe': ohe,
+        'stops_map': stops_map,
+        'class_map': class_map,
+        'nominal_cols': nom_cols
     }
-    encoders = {}
-    for col, classes in cols.items():
-        le = LabelEncoder()
-        le.fit(classes)
-        encoders[col] = le
-    return encoders
 
 
 @pytest.fixture
@@ -91,14 +103,28 @@ def api_client(mock_encoders):
     """FastAPI TestClient with mocked model and encoders."""
     from fastapi.testclient import TestClient
     from sklearn.ensemble import RandomForestRegressor
+    import pandas as pd
 
-    # Train a tiny model on encoded sample data
-    X = pd.DataFrame({
-        'airline': [0, 1], 'source_city': [0, 1],
-        'departure_time': [0, 1], 'stops': [0, 1],
-        'arrival_time': [0, 1], 'destination_city': [0, 1],
-        'class': [0, 1], 'duration': [5.0, 2.0], 'days_left': [10, 5],
+    ohe = mock_encoders['ohe']
+    nom_cols = mock_encoders['nominal_cols']
+    
+    df = pd.DataFrame({
+        'airline': ['Air_India', 'Indigo'],
+        'source_city': ['Bangalore', 'Delhi'],
+        'destination_city': ['Chennai', 'Delhi'],
+        'departure_time': ['Afternoon', 'Evening'],
+        'arrival_time': ['Afternoon', 'Evening'],
+        'route': ['Bangalore_Chennai', 'Delhi_Delhi'],
+        'stops': [0, 1],
+        'class': [0, 1],
+        'duration': [5.0, 2.0],
+        'days_left': [10, 5],
     })
+    
+    encoded = ohe.transform(df[nom_cols])
+    encoded_df = pd.DataFrame(encoded, columns=ohe.get_feature_names_out(nom_cols))
+    X = pd.concat([df.drop(columns=nom_cols), encoded_df], axis=1)
+    
     y = [10000, 5000]
     rf = RandomForestRegressor(n_estimators=2, random_state=42)
     rf.fit(X, y)

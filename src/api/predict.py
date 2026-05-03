@@ -124,13 +124,25 @@ def predict(req: PredictionRequest):
         "days_left": req.days_left
     }])
 
-    for col, enc in encoders.items():
-        if col in df.columns:
-            try:
-                df[col] = enc.transform(df[col].astype(str))
-            except ValueError:
-                request_metrics["errors"] += 1
-                return {"error": f"Unknown value in column {col}"}
+    df['route'] = df['source_city'] + '_' + df['destination_city']
+
+    # Ordinal encoding
+    if 'stops' in df.columns and 'stops_map' in encoders:
+        df['stops'] = df['stops'].map(encoders['stops_map']).fillna(0)
+    if 'class' in df.columns and 'class_map' in encoders:
+        df['class'] = df['class'].map(encoders['class_map']).fillna(0)
+
+    # OneHotEncoding
+    if 'ohe' in encoders and 'nominal_cols' in encoders:
+        ohe = encoders['ohe']
+        nom_cols = encoders['nominal_cols']
+        try:
+            encoded = ohe.transform(df[nom_cols])
+            encoded_df = pd.DataFrame(encoded, columns=ohe.get_feature_names_out(nom_cols), index=df.index)
+            df = pd.concat([df.drop(columns=nom_cols), encoded_df], axis=1)
+        except Exception as e:
+            request_metrics["errors"] += 1
+            return {"error": f"Error during encoding: {str(e)}"}
 
     pred = model.predict(df)[0]
     elapsed = (time.time() - start_time) * 1000
