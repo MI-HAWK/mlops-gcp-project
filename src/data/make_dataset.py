@@ -6,6 +6,17 @@ def create_splits(input_path="Clean_Dataset.csv", output_dir="data"):
     print("Loading dataset...")
     df = pd.read_csv(input_path)
     
+    # Preprocessing for Feast
+    if 'flight' in df.columns:
+        df = df.rename(columns={'flight': 'flight_id'})
+    
+    # Add event_timestamp for Feast offline store compatibility
+    df['event_timestamp'] = pd.Timestamp.now(tz='UTC')
+    
+    # Add new route feature
+    if 'source_city' in df.columns and 'destination_city' in df.columns:
+        df['route'] = df['source_city'] + '_' + df['destination_city']
+    
     # Create once: Full Dataset -> Train / Test (80 / 20)
     train_full, test_fixed = train_test_split(df, test_size=0.2, random_state=42)
     

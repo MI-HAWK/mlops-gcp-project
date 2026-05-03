@@ -2,7 +2,7 @@ import os
 import pandas as pd
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_squared_error, r2_score
-from sklearn.preprocessing import LabelEncoder
+from sklearn.preprocessing import OneHotEncoder
 import mlflow
 import mlflow.sklearn
 import joblib
@@ -10,41 +10,66 @@ import joblib
 import sys
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
 from src.utils.config import load_config
-
+from src.utils.feast_utils import get_training_features
 
 # ---------------------------------------------------------------------------
 # Extracted helper functions — testable independently
 # ---------------------------------------------------------------------------
 
-CATEGORICAL_COLS = [
-    'airline', 'source_city', 'departure_time',
-    'stops', 'arrival_time', 'destination_city', 'class'
+NOMINAL_COLS = [
+    'airline', 'source_city', 'destination_city',
+    'departure_time', 'arrival_time', 'route'
 ]
+ORDINAL_COLS = ['stops', 'class']
 
-DROP_COLS = ['price', 'flight', 'Unnamed: 0']
+DROP_COLS = ['price', 'flight_id', 'event_timestamp', 'Unnamed: 0']
 
-
-def encode_features(train_df, test_df, categorical_cols=None):
-    """Fit LabelEncoders on combined data and transform both splits.
-
+def encode_features(train_df, test_df):
+    """Apply OneHotEncoding to nominal features and map ordinal features.
+    
     Returns:
-        (train_df, test_df, encoders) — DataFrames with encoded columns
-        and the dict of fitted LabelEncoder instances.
+        (train_df, test_df, encoders)
     """
-    if categorical_cols is None:
-        categorical_cols = CATEGORICAL_COLS
-
     train_df = train_df.copy()
     test_df = test_df.copy()
+    
+    # 1. Manual Ordinal Encoding
+    stops_map = {'zero': 0, 'one': 1, 'two_or_more': 2}
+    class_map = {'Economy': 0, 'Business': 1}
+    
+    for df in [train_df, test_df]:
+        if 'stops' in df.columns:
+            df['stops'] = df['stops'].map(stops_map).fillna(0)
+        if 'class' in df.columns:
+            df['class'] = df['class'].map(class_map).fillna(0)
+    
+    # 2. OneHotEncoding for Nominal Columns
+    # Fit on both train and test to ensure consistent categories
+    ohe = OneHotEncoder(handle_unknown='ignore', sparse_output=False)
     combined_df = pd.concat([train_df, test_df], axis=0)
+    
+    existing_nominal_cols = [col for col in NOMINAL_COLS if col in combined_df.columns]
+    ohe.fit(combined_df[existing_nominal_cols])
+    
+    def apply_ohe(df):
+        encoded = ohe.transform(df[existing_nominal_cols])
+        encoded_df = pd.DataFrame(
+            encoded,
+            columns=ohe.get_feature_names_out(existing_nominal_cols),
+            index=df.index
+        )
+        df_dropped = df.drop(columns=existing_nominal_cols)
+        return pd.concat([df_dropped, encoded_df], axis=1)
 
-    encoders = {}
-    for col in categorical_cols:
-        le = LabelEncoder()
-        le.fit(combined_df[col].astype(str))
-        train_df[col] = le.transform(train_df[col].astype(str))
-        test_df[col] = le.transform(test_df[col].astype(str))
-        encoders[col] = le
+    train_df = apply_ohe(train_df)
+    test_df = apply_ohe(test_df)
+    
+    encoders = {
+        'ohe': ohe,
+        'stops_map': stops_map,
+        'class_map': class_map,
+        'nominal_cols': existing_nominal_cols
+    }
 
     return train_df, test_df, encoders
 
@@ -67,13 +92,19 @@ def prepare_features(df, drop_cols=None):
     """Drop non-feature columns and return X, y."""
     if drop_cols is None:
         drop_cols = DROP_COLS
-    X = df.drop(drop_cols, axis=1, errors='ignore')
+    
+    # Get y from 'price' column if it exists
     y = df['price'] if 'price' in df.columns else None
+    
+    # Ensure we drop the target column and unused id/timestamp cols
+    cols_to_drop = [c for c in drop_cols if c in df.columns]
+    X = df.drop(columns=cols_to_drop)
+    
     return X, y
 
 
 # ---------------------------------------------------------------------------
-# Main training orchestrator — unchanged behaviour, calls helpers
+# Main training orchestrator — integrates Feast and OHE
 # ---------------------------------------------------------------------------
 
 def train_model():
@@ -89,10 +120,25 @@ def train_model():
         print(f"Data files {train_data_path} or {test_data_path} not found.")
         exit(1)
 
-    train_df = pd.read_csv(train_data_path)
-    test_df = pd.read_csv(test_data_path)
+    train_raw = pd.read_csv(train_data_path)
+    test_raw = pd.read_csv(test_data_path)
+    
+    # Convert event_timestamp for Feast
+    train_raw['event_timestamp'] = pd.to_datetime(train_raw['event_timestamp'], utc=True)
+    test_raw['event_timestamp'] = pd.to_datetime(test_raw['event_timestamp'], utc=True)
+    
+    print("Fetching features from Feast offline store...")
+    train_entity_df = train_raw[['flight_id', 'event_timestamp']]
+    test_entity_df = test_raw[['flight_id', 'event_timestamp']]
+    
+    train_features = get_training_features(train_entity_df)
+    test_features = get_training_features(test_entity_df)
+    
+    # Re-join the target column (price) back to the features
+    train_df = pd.merge(train_features, train_raw[['flight_id', 'event_timestamp', 'price']], on=['flight_id', 'event_timestamp'], how='left')
+    test_df = pd.merge(test_features, test_raw[['flight_id', 'event_timestamp', 'price']], on=['flight_id', 'event_timestamp'], how='left')
 
-    # Preprocessing — now via helper
+    # Preprocessing — now via helper (OHE and Ordinal)
     train_df, test_df, encoders = encode_features(train_df, test_df)
 
     X_train, y_train = prepare_features(train_df)

@@ -33,6 +33,7 @@ flight_features = FeatureView(
         Field(name="arrival_time", dtype=String),
         Field(name="destination_city", dtype=String),
         Field(name="class", dtype=String),
+        Field(name="route", dtype=String),
     ],
     online=True,
     source=flight_stats_source,
