@@ -61,7 +61,10 @@ jobs:
       - name: Train model and register to MLflow
         env:
           MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
-        run: python src/model/train.py
+        run: |
+          python src/utils/prepare_feast.py
+          cd feast_repo && feast apply && cd ..
+          python src/model/train.py
 
       # ----------------------------------------------------------------
       # Step 4: Build Docker Image
