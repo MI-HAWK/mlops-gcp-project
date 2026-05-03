@@ -10,7 +10,7 @@ env:
 
 jobs:
   validate-for-production:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest-16-cores
     permissions:
       contents: 'write'
       id-token: 'write'
@@ -95,9 +95,9 @@ jobs:
         env:
           MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
         run: |
-          python src/utils/prepare_feast.py
+          python -u src/utils/prepare_feast.py
           cd feast_repo && feast apply && cd ..
-          python src/model/train.py
+          python -u src/model/train.py
 
       # ----------------------------------------------------------------
       # Step 7: CML Report
