@@ -108,9 +108,6 @@ jobs:
         run: |
           echo "## 🚀 Production CI Report — develop → main" > report.md
           echo "" >> report.md
-          echo "### Current Metrics (Production Data)" >> report.md
-          cat metrics.txt >> report.md
-          echo "" >> report.md
 
           echo "### Model Performance" >> report.md
           CURR_RMSE=$(grep -i "rmse" metrics.txt | head -1 | awk '{print $2}')

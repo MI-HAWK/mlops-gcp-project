@@ -87,9 +87,6 @@ jobs:
         run: |
           echo "## 📊 Model Evaluation Report — Dev CI" > report.md
           echo "" >> report.md
-          echo "### Current Metrics" >> report.md
-          cat metrics.txt >> report.md
-          echo "" >> report.md
 
           echo "### Model Performance" >> report.md
           CURR_RMSE=$(grep -i "rmse" metrics.txt | head -1 | awk '{print $2}')
