@@ -85,7 +85,7 @@ jobs:
         env:
           REPO_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          echo "## 📊 Model Evaluation Report — Dev CI" > report.md
+          echo "## Model Evaluation Report — Dev CI" > report.md
           echo "" >> report.md
 
           echo "### Model Performance" >> report.md
