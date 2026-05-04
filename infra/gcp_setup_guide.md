@@ -3,7 +3,7 @@
 This guide details the exact configurations to deploy and initialize the environments for the 3-tier MLOps project. Ensure you run this inside the Google Cloud Shell or a local terminal authenticated with `gcloud`.
 
 ## Ensure Initialization
-Run in **Cloud Shell or local terminal**:
+Run in **Cloud Shell**:
 ```bash 
 gcloud auth login
 export PROJECT_ID="<YOUR_GCP_PROJECT_ID>"
@@ -12,7 +12,7 @@ export REGION="us-central1"
 ```
 
 ## 0. Enable Required GCP APIs
-Run in **Cloud Shell or local terminal**. This enables all GCP services used by the pipeline:
+Run in **Cloud Shell**. This enables all GCP services used by the pipeline:
 ```bash
 gcloud services enable \
     container.googleapis.com \
@@ -54,7 +54,7 @@ gcloud container clusters create staging-gke-cluster \
     --machine-type n1-standard-2 \
     --disk-size 30
 
-# Prod Cluster (zonal — must be us-central1-a; all prod workflows hardcode this zone)
+# Prod Cluster (zonal - must be us-central1-a; all prod workflows hardcode this zone)
 gcloud container clusters create prod-gke-cluster \
     --zone us-central1-a \
     --num-nodes 1 \
@@ -207,13 +207,13 @@ In your **GitHub Repository**, navigate to **Settings > Secrets and variables > 
 
 ---
 
-## 8. Kubernetes ConfigMap — Prod and Staging Clusters
+## 8. Kubernetes ConfigMap - Prod and Staging Clusters
 The prod and staging deployments read `MLFLOW_TRACKING_URI` from a Kubernetes ConfigMap named `mlflow-config`. The CD workflows upsert this ConfigMap automatically on every deploy, but you should create it once manually before the first deployment so it is available immediately.
 
 ### Prod Cluster
 Run in **Cloud Shell or local terminal**:
 ```bash
-# Point kubectl at the prod cluster (zonal — must match the zone used at creation)
+# Point kubectl at the prod cluster (zonal - must match the zone used at creation)
 gcloud container clusters get-credentials prod-gke-cluster \
     --zone us-central1-a
 
@@ -242,8 +242,8 @@ kubectl create configmap mlflow-config \
 > ```
 > Run this on each cluster after switching contexts.
 
-## 9. GKE BackendConfig — Prod Ingress
-`infra/k8s/prod/ingress.yaml` includes a `BackendConfig` resource that configures health checks on the Cloud Load Balancer. It is applied automatically by CD-prod as part of `kubectl apply -f infra/k8s/prod/ingress.yaml`. No manual step is needed — this note is here for reference only.
+## 9. GKE BackendConfig - Prod Ingress
+`infra/k8s/prod/ingress.yaml` includes a `BackendConfig` resource that configures health checks on the Cloud Load Balancer. It is applied automatically by CD-prod as part of `kubectl apply -f infra/k8s/prod/ingress.yaml`. No manual step is needed - this note is here for reference only.
 
 The BackendConfig configures GCE to probe `/health` on port 8080. If you ever need to apply it manually before the first deployment, run:
 ```bash
@@ -256,10 +256,10 @@ The pipeline has four GitHub Actions workflows. Pushes and PRs to specific branc
 
 | Workflow | File | Trigger | What It Does |
 |---|---|---|---|
-| CI — Dev | `1-ci-dev.yaml` | PR → `develop` | Runs unit/integration/sanity tests, trains on dev data, enforces quality gate (RMSE ≤ 5% regression); posts metrics report on PR |
-| CD — Staging | `2-cd-staging.yaml` | Push → `develop` | Trains on staging data, builds `flight-pricing-api` Docker image, pushes to Artifact Registry (`staging-latest` tag), deploys to `staging-gke-cluster` |
-| CI — Prod | `3-ci-prod.yaml` | PR → `main` | Full test suite + schema validation + drift check (PSI ≤ 0.2, advisory) + trains on prod data + strict gate (RMSE ≤ 2%); posts metrics report on PR |
-| CD — Prod | `4-cd-prod.yaml` | Push → `main` | Builds prod image (`prod-latest` tag), smoke tests, pushes to Artifact Registry, deploys single `ml-api-prod` deployment to `prod-gke-cluster` |
+| CI - Dev | `1-ci-dev.yaml` | PR → `develop` | Runs unit/integration/sanity tests, trains on dev data, enforces quality gate (RMSE ≤ 5% regression); posts metrics report on PR |
+| CD - Staging | `2-cd-staging.yaml` | Push → `develop` | Trains on staging data, builds `flight-pricing-api` Docker image, pushes to Artifact Registry (`staging-latest` tag), deploys to `staging-gke-cluster` |
+| CI - Prod | `3-ci-prod.yaml` | PR → `main` | Full test suite + schema validation + drift check (PSI ≤ 0.2, advisory) + trains on prod data + strict gate (RMSE ≤ 2%); posts metrics report on PR |
+| CD - Prod | `4-cd-prod.yaml` | Push → `main` | Builds prod image (`prod-latest` tag), smoke tests, pushes to Artifact Registry, deploys single `ml-api-prod` deployment to `prod-gke-cluster` |
 
 **Branch strategy:**
 - Work on feature branches → open PR to `develop` (triggers CI-Dev)
@@ -268,36 +268,12 @@ The pipeline has four GitHub Actions workflows. Pushes and PRs to specific branc
 - Merge to `main` → prod deploys automatically (triggers CD-Prod)
 
 ## 11. First-Time End-to-End Pipeline Run
-Follow this sequence exactly on the first run. GitHub Actions steps are fully automatic — you only trigger them by opening PRs or merging.
+Follow this sequence exactly on the first run. GitHub Actions steps are fully automatic - you only trigger them by opening PRs or merging.
 
-### Step 1 — Authenticate Locally and Push Data to DVC Remotes 
-Run **locally** in the project root:
-```bash
-# Allow local gcloud to access GCS on your behalf
-gcloud auth application-default login
+### Step 1 - Run above commands
+Run **locally or in GCP Cloud Shell** depending upon the steps:
 
-# Generate dataset splits (creates dev/staging/prod CSVs under data/)
-python src/data/make_dataset.py
-
-# Track and push dev data
-dvc add data/dev_train.csv data/dev_test.csv
-dvc push -r dev-gcs
-
-# Track and push staging data
-dvc add data/staging_train.csv data/staging_test.csv
-dvc push -r staging-gcs
-
-# Track and push prod data
-dvc add data/prod_train.csv data/prod_test.csv
-dvc push -r prod-gcs
-
-# Commit the .dvc pointer files
-git add data/*.dvc .dvc/config
-git commit -m "Add DVC-tracked datasets for all environments"
-git push origin develop
-```
-
-### Step 2 — Trigger Dev CI (PR to develop)
+### Step 2 - Trigger Dev CI (PR to develop)
 Run **locally**:
 ```bash
 git checkout -b feature/initial-model
@@ -307,29 +283,29 @@ git push origin feature/initial-model
 ```
 Open a **Pull Request** on GitHub from `feature/initial-model` → `develop`. This triggers `1-ci-dev.yaml` automatically. A metrics report comment appears on the PR with current RMSE and R2 values. Merge the PR when tests and validation checks pass.
 
-### Step 3 — Staging Deployment (automatic after merge to develop)
+### Step 3 - Staging Deployment (automatic after merge to develop)
 Merging the PR in Step 2 triggers `2-cd-staging.yaml`. Monitor it in **GitHub → Actions tab**. It will train on staging data, build the image, and deploy to `staging-gke-cluster`. After the workflow completes:
 ```bash
-# Run in Cloud Shell or local terminal
+# Run in Cloud Shell
 gcloud container clusters get-credentials staging-gke-cluster --region us-central1
 kubectl get service ml-api-staging-svc   # note the EXTERNAL-IP column
 curl http://<STAGING_LB_IP>/health
 curl http://<STAGING_LB_IP>/ready
 ```
 
-### Step 4 — Trigger Prod CI (PR to main)
+### Step 4 - Trigger Prod CI (PR to main)
 On **GitHub**, open a Pull Request from `develop` → `main`. This triggers `3-ci-prod.yaml`. It runs schema validation and PSI drift detection (comparing prod vs dev data). A metrics report is posted on the PR. Merge when tests and validation checks pass.
 
-### Step 5 — Prod Deployment (automatic after merge to main)
+### Step 5 - Prod Deployment (automatic after merge to main)
 Merging triggers `4-cd-prod.yaml`. It builds the image, runs container smoke tests, and deploys a single `ml-api-prod` deployment to `prod-gke-cluster` with a Cloud Load Balancer Ingress. After it completes:
 ```bash
-# Run in Cloud Shell or local terminal
+# Run in Cloud Shell
 gcloud container clusters get-credentials prod-gke-cluster --zone us-central1-a
 
 # Check pods are Running (model download takes ~30-60s after pod starts)
 kubectl get pods -l app=ml-api-prod -w
 
-# The ingress provisions a Cloud Load Balancer — allow 2-3 minutes for an IP to appear
+# The ingress provisions a Cloud Load Balancer - allow 2-3 minutes for an IP to appear
 kubectl get ingress ml-pricing-ingress
 
 # Validate endpoints
@@ -343,7 +319,7 @@ curl -X POST http://<INGRESS_ADDRESS>/predict \
 ## 12. Monitor Prod Deployment
 
 ### Check Live Metrics
-Run in **Cloud Shell or local terminal** with prod cluster credentials active:
+Run in **Cloud Shell** with prod cluster credentials active:
 ```bash
 # Get the ingress IP
 kubectl get ingress ml-pricing-ingress
@@ -362,7 +338,7 @@ curl http://localhost:8080/ready
 ### Re-deploy a New Model Version
 Every push to `main` triggers a full retrain and redeploy. To roll out a new model version:
 ```bash
-# On your local machine — open PR develop → main as usual
+# On your local machine - open PR develop → main as usual
 git checkout develop
 git pull origin develop
 git checkout -b feature/new-model-version
