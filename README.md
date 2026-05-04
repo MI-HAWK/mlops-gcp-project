@@ -2,7 +2,7 @@
 
 Welcome to the **Flight Pricing Prediction System**, an end-to-end, production-grade Machine Learning pipeline designed around modern MLOps principles. This repository orchestrates data versioning, feature management, model training, metric tracking, and containerized deployment natively on Google Cloud Platform (GCP).
 
-## 🚀 Overview & Key Technologies
+## Overview & Key Technologies
 
 This project implements a highly structured, scalable CI/CD architecture utilizing the following stack:
 - **Google Kubernetes Engine (GKE):** Multi-environment (Staging & Production) containerized application hosting.
@@ -12,7 +12,7 @@ This project implements a highly structured, scalable CI/CD architecture utilizi
 - **MLflow:** Centralized model registry, experiment tracking, and metric logging.
 - **FastAPI:** High-performance REST API serving the machine learning predictions via a Cloud Load Balancer.
 
-## 🏗️ Architecture & Workflow
+## Architecture & Workflow
 
 The following diagram illustrates the complete workflow spanning code commits, automated pipeline execution, MLOps tooling integration, and final endpoint serving on GCP.
 
@@ -67,14 +67,14 @@ graph LR
     User <-->|REST Request| LB
 ```
 
-## 🛠️ Setup & Reproducibility
+## Setup & Reproducibility
 
 To ensure complete reproducibility from scratch, comprehensive step-by-step guides have been provided in the `infra/` folder. These guides walk you through setting up the necessary GCP infrastructure, service accounts, MLflow cluster, and DVC remotes.
 
 1. **[GCP Setup Guide](infra/gcp_setup_guide.md)**: Follow this to initialize the project, provision GKE clusters, set up IAM Workload Identity Federation, and execute your first end-to-end pipeline run.
 2. **[GCP Teardown Guide](infra/gcp_teardown_guide.md)**: Follow this to safely destroy all provisioned GCP resources and prevent any unexpected cloud billing charges once you are finished.
 
-## 🔮 Further Steps & Future Enhancements
+## Further Steps & Future Enhancements
 
 As the architecture evolves, the following strategic upgrades are recommended:
 
