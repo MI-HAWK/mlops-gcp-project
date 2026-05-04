@@ -94,12 +94,12 @@ jobs:
           for i in $(seq 1 24); do
             READY=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/ready || echo "000")
             if [ "$READY" = "200" ]; then
-              echo "✅ Container ready with model loaded after $((i * 5))s"
+              echo "Container ready with model loaded after $((i * 5))s"
               break
             fi
             echo "Attempt $i/24: /ready=$READY — waiting 5s..."
             if [ "$i" = "24" ]; then
-              echo "❌ Container model not ready within 120s"
+              echo "Container model not ready within 120s"
               docker logs smoke-test
               docker stop smoke-test && docker rm smoke-test
               exit 1
@@ -111,11 +111,11 @@ jobs:
           echo "Testing /health..."
           HEALTH=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/health)
           if [ "$HEALTH" != "200" ]; then
-            echo "❌ Health check failed (HTTP $HEALTH)"
+            echo "Health check failed (HTTP $HEALTH)"
             docker logs smoke-test
             exit 1
           fi
-          echo "✅ Health check passed"
+          echo "Health check passed"
 
           # Test /predict endpoint
           echo "Testing /predict..."
@@ -126,9 +126,9 @@ jobs:
 
           # Check response contains prediction or expected error
           if echo "$PREDICT_RESP" | grep -q "prediction_price\|error"; then
-            echo "✅ Predict endpoint responding"
+            echo "Predict endpoint responding"
           else
-            echo "❌ Unexpected predict response"
+            echo "Unexpected predict response"
             exit 1
           fi
 
@@ -184,5 +184,5 @@ jobs:
               -d '{"airline":"Vistara","source_city":"Delhi","departure_time":"Morning","stops":"one","arrival_time":"Afternoon","destination_city":"Mumbai","class_type":"Business","duration":5.5,"days_left":15}' || echo "{}")
             echo "Prediction response: $PRED"
           else
-            echo "⚠️ Could not get staging IP — LoadBalancer may still be provisioning"
+            echo "Could not get staging IP — LoadBalancer may still be provisioning"
           fi

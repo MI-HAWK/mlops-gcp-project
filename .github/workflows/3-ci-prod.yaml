@@ -84,7 +84,7 @@ jobs:
           with open('drift_report.json', 'w') as f:
               json.dump(result, f, indent=2)
           if not result['passed']:
-              print('⚠️ WARNING: Drift detected in features:', result['drifted_features'])
+              print('WARNING: Drift detected in features:', result['drifted_features'])
               print('Drift check is advisory — not blocking the pipeline')
           " || true
 
@@ -106,7 +106,7 @@ jobs:
         env:
           REPO_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          echo "## 🚀 Production CI Report — develop → main" > report.md
+          echo "## Production CI Report — develop → main" > report.md
           echo "" >> report.md
 
           echo "### Model Performance" >> report.md
