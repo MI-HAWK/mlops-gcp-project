@@ -37,9 +37,9 @@ class TestMetricsEndpoint:
     def test_metrics_returns_structure(self, api_client):
         resp = api_client.get("/metrics")
         assert resp.status_code == 200
-        data = resp.json()
-        assert "total_requests" in data
-        assert "model_version" in data
+        text = resp.text
+        assert "http_requests_total" in text
+        assert "http_request_latency_seconds" in text
 
 
 class TestPredictEndpoint:
@@ -73,13 +73,11 @@ class TestPredictEndpoint:
         assert "prediction_price" in data
 
     def test_predict_updates_metrics(self, api_client, valid_predict_payload):
-        # Get initial metrics
-        m1 = api_client.get("/metrics").json()
-        initial_count = m1["total_requests"]
-
         # Make a prediction
         api_client.post("/predict", json=valid_predict_payload)
 
-        # Check metrics incremented
-        m2 = api_client.get("/metrics").json()
-        assert m2["total_requests"] == initial_count + 1
+        # Check metrics updated (Prometheus text format)
+        resp = api_client.get("/metrics")
+        text = resp.text
+        assert "http_requests_total" in text
+        assert "model_prediction_value" in text

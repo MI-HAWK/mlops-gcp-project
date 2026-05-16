@@ -31,9 +31,10 @@ kubectl delete ingress ml-pricing-ingress --ignore-not-found
 kubectl delete deployment ml-api-prod --ignore-not-found
 kubectl delete service ml-api-prod-svc --ignore-not-found
 
-# Delete configmaps and BackendConfig
+# Delete configmaps, BackendConfig, and HPA
 kubectl delete configmap mlflow-config --ignore-not-found
 kubectl delete backendconfig ml-api-backend-config --ignore-not-found
+kubectl delete hpa ml-api-prod-hpa --ignore-not-found
 
 # Confirm nothing remains
 kubectl get all
@@ -117,10 +118,20 @@ gcloud iam workload-identity-pools delete github-pool-v8 \
     --location="global" --quiet
 ```
 
+## 8. Disable GCP Observability APIs (Optional)
+If you wish to completely stop all billing and disable tracing/monitoring:
+```bash
+gcloud services disable \
+    cloudtrace.googleapis.com \
+    monitoring.googleapis.com \
+    logging.googleapis.com \
+    --force
+```
+
 > [!TIP]
 > After running these commands, verify in the [Google Cloud Console](https://console.cloud.google.com/billing) that no unexpected resources are still running to ensure you are not billed further.
 
-## 8. Verification Commands
+## 9. Verification Commands
 Run these commands to verify that the resources are successfully deleted. If a resource is deleted, the command should return empty output, or an error stating the resource was not found.
 
 ```bash

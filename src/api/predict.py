@@ -3,27 +3,53 @@ import os
 import time
 import joblib
 import pandas as pd
-from fastapi import FastAPI
+import logging
+from pythonjsonlogger import jsonlogger
+from fastapi import FastAPI, Response
 from fastapi.responses import JSONResponse
 import mlflow.sklearn
 from pydantic import BaseModel
+import prometheus_client
+
+from opentelemetry import trace
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import BatchSpanProcessor
+from opentelemetry.exporter.cloud_trace import CloudTraceSpanExporter
+from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 
 import sys
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
 from src.utils.config import load_config
 
+# Configure structured JSON logging
+logger = logging.getLogger("ml_api")
+logger.setLevel(logging.INFO)
+logHandler = logging.StreamHandler()
+formatter = jsonlogger.JsonFormatter('%(asctime)s %(levelname)s %(name)s %(message)s %(trace_id)s')
+logHandler.setFormatter(formatter)
+logger.addHandler(logHandler)
+
+# Configure OpenTelemetry Tracing
+tracer_provider = TracerProvider()
+try:
+    cloud_trace_exporter = CloudTraceSpanExporter()
+    tracer_provider.add_span_processor(BatchSpanProcessor(cloud_trace_exporter))
+except Exception as e:
+    logger.warning("Could not initialize CloudTraceSpanExporter. Traces will not be sent to GCP.", extra={"error": str(e), "trace_id": ""})
+trace.set_tracer_provider(tracer_provider)
+tracer = trace.get_tracer(__name__)
+
+# Configure Prometheus Metrics
+REQUEST_COUNT = prometheus_client.Counter('http_requests_total', 'Total HTTP Requests', ['method', 'endpoint', 'http_status'])
+REQUEST_LATENCY = prometheus_client.Histogram('http_request_latency_seconds', 'HTTP Request Latency', ['method', 'endpoint'])
+PREDICTION_VALUE = prometheus_client.Histogram('model_prediction_value', 'Model Prediction Value')
+
 app = FastAPI()
+FastAPIInstrumentor.instrument_app(app)
 
 model = None
 encoders = None
 model_info = {}
-
-request_metrics = {
-    "total_requests": 0,
-    "errors": 0,
-    "latencies": [],
-    "predictions": [],
-}
 
 class PredictionRequest(BaseModel):
     airline: str
@@ -53,8 +79,9 @@ def load_assets():
         model_uri = f"models:/{model_name}/latest"
         model = mlflow.sklearn.load_model(model_uri)
         model_info = {"name": model_name, "uri": model_uri}
+        logger.info("Model loaded successfully", extra={"model_uri": model_uri, "trace_id": ""})
     except Exception as e:
-        print(f"Warning: could not load model from MLflow: {e}")
+        logger.error("Warning: could not load model from MLflow", extra={"error": str(e), "trace_id": ""})
         model = None
 
     try:
@@ -66,14 +93,17 @@ def load_assets():
                 f"runs:/{mv.run_id}/encoders/encoders.joblib"
             )
             encoders = joblib.load(encoder_path)
+            logger.info("Encoders loaded from MLflow", extra={"trace_id": ""})
         else:
             encoders = joblib.load("models/encoders.joblib")
+            logger.info("Encoders loaded locally", extra={"trace_id": ""})
     except Exception as e:
-        print(f"Warning: could not load encoders from MLflow ({e}), trying local path...")
+        logger.warning("Warning: could not load encoders from MLflow, trying local path...", extra={"error": str(e), "trace_id": ""})
         try:
             encoders = joblib.load("models/encoders.joblib")
+            logger.info("Encoders loaded locally after MLflow failure", extra={"trace_id": ""})
         except Exception as e2:
-            print(f"Warning: could not load encoders locally: {e2}")
+            logger.error("Warning: could not load encoders locally", extra={"error": str(e2), "trace_id": ""})
             encoders = None
 
 @app.get("/")
@@ -92,25 +122,19 @@ def ready():
 
 @app.get("/metrics")
 def metrics():
-    lats = request_metrics["latencies"]
-    return {
-        "model": model_info,
-        "model_version": model_info.get("name", "unknown"),
-        "total_requests": request_metrics["total_requests"],
-        "errors": request_metrics["errors"],
-        "avg_latency_ms": round(sum(lats) / len(lats), 2) if lats else 0,
-        "p95_latency_ms": round(sorted(lats)[int(len(lats) * 0.95)] if lats else 0, 2),
-        "avg_prediction": round(sum(request_metrics["predictions"]) / len(request_metrics["predictions"]), 2) if request_metrics["predictions"] else 0,
-    }
+    return Response(content=prometheus_client.generate_latest(), media_type="text/plain")
 
 @app.post("/predict")
 def predict(req: PredictionRequest):
+    current_span = trace.get_current_span()
+    trace_id = format(current_span.get_span_context().trace_id, "032x") if current_span.is_recording() else ""
+    
     start_time = time.time()
-    request_metrics["total_requests"] += 1
-
+    
     if model is None or encoders is None:
-        request_metrics["errors"] += 1
-        return {"error": "Model or encoders not loaded properly"}
+        REQUEST_COUNT.labels(method='POST', endpoint='/predict', http_status=500).inc()
+        logger.error("Model or encoders not loaded properly", extra={"trace_id": trace_id})
+        return JSONResponse(status_code=500, content={"error": "Model or encoders not loaded properly"})
 
     df = pd.DataFrame([{
         "airline": req.airline,
@@ -141,27 +165,29 @@ def predict(req: PredictionRequest):
             encoded_df = pd.DataFrame(encoded, columns=ohe.get_feature_names_out(nom_cols), index=df.index)
             df = pd.concat([df.drop(columns=nom_cols), encoded_df], axis=1)
         except Exception as e:
-            request_metrics["errors"] += 1
-            return {"error": f"Error during encoding: {str(e)}"}
+            REQUEST_COUNT.labels(method='POST', endpoint='/predict', http_status=400).inc()
+            logger.error("Error during encoding", extra={"error": str(e), "trace_id": trace_id})
+            return JSONResponse(status_code=400, content={"error": f"Error during encoding: {str(e)}"})
 
     if hasattr(model, 'feature_names_in_'):
         try:
             df = df[model.feature_names_in_]
         except Exception as e:
-            request_metrics["errors"] += 1
-            return {"error": f"Feature mismatch: {str(e)}"}
+            REQUEST_COUNT.labels(method='POST', endpoint='/predict', http_status=400).inc()
+            logger.error("Feature mismatch", extra={"error": str(e), "trace_id": trace_id})
+            return JSONResponse(status_code=400, content={"error": f"Feature mismatch: {str(e)}"})
 
     try:
         pred = model.predict(df)[0]
     except Exception as e:
-        request_metrics["errors"] += 1
-        return {"error": f"Prediction failed: {str(e)}"}
-    elapsed = (time.time() - start_time) * 1000
+        REQUEST_COUNT.labels(method='POST', endpoint='/predict', http_status=500).inc()
+        logger.error("Prediction failed", extra={"error": str(e), "trace_id": trace_id})
+        return JSONResponse(status_code=500, content={"error": f"Prediction failed: {str(e)}"})
+    
+    elapsed = time.time() - start_time
+    REQUEST_LATENCY.labels(method='POST', endpoint='/predict').observe(elapsed)
+    REQUEST_COUNT.labels(method='POST', endpoint='/predict', http_status=200).inc()
+    PREDICTION_VALUE.observe(float(pred))
 
-    request_metrics["latencies"].append(elapsed)
-    request_metrics["predictions"].append(float(pred))
-    if len(request_metrics["latencies"]) > 1000:
-        request_metrics["latencies"] = request_metrics["latencies"][-1000:]
-        request_metrics["predictions"] = request_metrics["predictions"][-1000:]
-
+    logger.info("Prediction successful", extra={"prediction_price": float(pred), "latency_s": elapsed, "trace_id": trace_id})
     return {"prediction_price": float(pred)}

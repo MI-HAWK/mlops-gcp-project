@@ -125,6 +125,7 @@ jobs:
           kubectl apply -f infra/k8s/prod/deployment.yaml
           kubectl apply -f infra/k8s/prod/service.yaml
           kubectl apply -f infra/k8s/prod/ingress.yaml
+          kubectl apply -f infra/k8s/prod/hpa.yaml
           kubectl rollout status deployment/ml-api-prod --timeout=180s
 
       # ----------------------------------------------------------------
