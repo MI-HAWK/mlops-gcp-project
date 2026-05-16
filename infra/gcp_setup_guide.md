@@ -19,7 +19,10 @@ gcloud services enable \
     artifactregistry.googleapis.com \
     compute.googleapis.com \
     iamcredentials.googleapis.com \
-    storage.googleapis.com
+    storage.googleapis.com \
+    cloudtrace.googleapis.com \
+    monitoring.googleapis.com \
+    logging.googleapis.com
 ```
 
 ## 1. Cloud Storage Buckets (Data Isolation)
@@ -125,6 +128,18 @@ gcloud projects add-iam-policy-binding $PROJECT_ID \
 gcloud projects add-iam-policy-binding $PROJECT_ID \
     --member="serviceAccount:${SA_EMAIL}" \
     --role="roles/container.developer"
+
+gcloud projects add-iam-policy-binding $PROJECT_ID \
+    --member="serviceAccount:${SA_EMAIL}" \
+    --role="roles/cloudtrace.agent"
+
+gcloud projects add-iam-policy-binding $PROJECT_ID \
+    --member="serviceAccount:${SA_EMAIL}" \
+    --role="roles/monitoring.metricWriter"
+
+gcloud projects add-iam-policy-binding $PROJECT_ID \
+    --member="serviceAccount:${SA_EMAIL}" \
+    --role="roles/logging.logWriter"
 ```
 
 ### Configure Workload Identity Federation
@@ -347,3 +362,34 @@ git push origin feature/new-model-version
 # Open PR: feature/new-model-version → develop, merge → then PR develop → main, merge
 ```
 CD-prod will build a new image tagged with the commit SHA and `prod-latest`, and roll it out with zero-downtime (`kubectl rollout status` waits for readiness before completing).
+
+## 13. GCP Observability & Autoscaling
+
+This project includes production-grade observability natively integrated with GCP.
+
+### Distributed Tracing (Cloud Trace)
+The API uses OpenTelemetry to send distributed traces to GCP Cloud Trace.
+1. Open **GCP Console → Trace**.
+2. View request latencies broken down by endpoints.
+
+### Monitoring & Metrics (Managed Prometheus)
+GKE is configured to scrape Prometheus metrics exposed at `/metrics`.
+1. Ensure Managed Prometheus is enabled on your GKE cluster:
+   ```bash
+   gcloud container clusters update prod-gke-cluster --zone us-central1-a --enable-managed-prometheus
+   ```
+2. Open **GCP Console → Monitoring → Metrics Explorer**.
+3. Query metrics like `http_requests_total` or `http_request_latency_seconds`.
+
+### Centralized Logging (Cloud Logging)
+Structured JSON logs containing `trace_id` are automatically ingested.
+1. Open **GCP Console → Logging → Logs Explorer**.
+2. Filter by `resource.type="k8s_container"` and `labels."k8s-pod/app"="ml-api-prod"`.
+
+### Autoscaling (HPA)
+The production deployment scales automatically between 2 and 10 replicas based on CPU (70%) and Memory (80%) utilization.
+Run a load test to verify:
+```bash
+wrk -t8 -c500 -d120s -s tests/load_test/benchmark.lua http://<INGRESS_ADDRESS>/predict
+kubectl get hpa ml-api-prod-hpa -w
+```

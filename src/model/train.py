@@ -8,9 +8,20 @@ import mlflow.sklearn
 import joblib
 
 import sys
+import logging
+from pythonjsonlogger import jsonlogger
+
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
 from src.utils.config import load_config
 from src.utils.feast_utils import get_training_features
+
+# Configure structured JSON logging
+logger = logging.getLogger("train_job")
+logger.setLevel(logging.INFO)
+logHandler = logging.StreamHandler()
+formatter = jsonlogger.JsonFormatter('%(asctime)s %(levelname)s %(name)s %(message)s')
+logHandler.setFormatter(formatter)
+logger.addHandler(logHandler)
 
 # ---------------------------------------------------------------------------
 # Extracted helper functions — testable independently
@@ -110,14 +121,14 @@ def prepare_features(df, drop_cols=None):
 def train_model():
     config = load_config()
     env = config['env']
-    print(f"Starting training pipeline for environment: {env}")
+    logger.info("Starting training pipeline", extra={"environment": env})
 
     # Paths based on environment dataset
     train_data_path = f"data/{env}_train.csv"
     test_data_path = f"data/{env}_test.csv"
 
     if not (os.path.exists(train_data_path) and os.path.exists(test_data_path)):
-        print(f"Data files {train_data_path} or {test_data_path} not found.")
+        logger.error("Data files not found", extra={"train_data_path": train_data_path, "test_data_path": test_data_path})
         exit(1)
 
     train_raw = pd.read_csv(train_data_path)
@@ -127,7 +138,7 @@ def train_model():
     train_raw['event_timestamp'] = pd.to_datetime(train_raw['event_timestamp'], utc=True)
     test_raw['event_timestamp'] = pd.to_datetime(test_raw['event_timestamp'], utc=True)
     
-    print("Fetching features from Feast offline store...")
+    logger.info("Fetching features from Feast offline store")
     train_entity_df = train_raw[['flight_id', 'event_timestamp']]
     test_entity_df = test_raw[['flight_id', 'event_timestamp']]
     
@@ -160,7 +171,7 @@ def train_model():
         metrics = compute_metrics(y_test, preds)
 
         mlflow.log_metrics(metrics)
-        print(f"Metrics - RMSE: {metrics['rmse']:.2f}, R2: {metrics['r2']:.2f}")
+        logger.info("Training metrics", extra={"rmse": metrics['rmse'], "r2": metrics['r2']})
 
         # Save encoders locally and log to MLflow so the serving container can download them
         os.makedirs("models", exist_ok=True)
