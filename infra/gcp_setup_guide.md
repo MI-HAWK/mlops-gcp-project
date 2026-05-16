@@ -148,17 +148,17 @@ gcloud projects add-iam-policy-binding $PROJECT_ID \
 gcloud services enable iamcredentials.googleapis.com
 
 # Create Workload Identity Pool
-gcloud iam workload-identity-pools create github-pool-v8 \
+gcloud iam workload-identity-pools create github-pool-v9 \
     --location="global" \
     --description="Pool for GitHub Actions" \
     --display-name="GitHub Actions Pool"
 
-export WORKLOAD_IDENTITY_POOL_ID=$(gcloud iam workload-identity-pools describe github-pool-v8 --location="global" --format="value(name)")
+export WORKLOAD_IDENTITY_POOL_ID=$(gcloud iam workload-identity-pools describe github-pool-v9 --location="global" --format="value(name)")
 
 # Create Workload Identity Provider
 gcloud iam workload-identity-pools providers create-oidc github-provider \
     --location="global" \
-    --workload-identity-pool="github-pool-v8" \
+    --workload-identity-pool="github-pool-v9" \
     --display-name="GitHub Provider" \
     --attribute-mapping="google.subject=assertion.sub,attribute.actor=assertion.actor,attribute.repository=assertion.repository" \
     --attribute-condition="assertion.repository == '${GITHUB_REPO}'" \
@@ -170,10 +170,10 @@ gcloud iam service-accounts add-iam-policy-binding $SA_EMAIL \
     --member="principalSet://iam.googleapis.com/${WORKLOAD_IDENTITY_POOL_ID}/attribute.repository/${GITHUB_REPO}"
 
 # Get the Provider ID to put in GitHub Secrets
-gcloud iam workload-identity-pools providers describe github-provider \
-    --location="global" \
-    --workload-identity-pool="github-pool-v8" \
-    --format="value(name)"
+    gcloud iam workload-identity-pools providers describe github-provider \
+        --location="global" \
+        --workload-identity-pool="github-pool-v9" \
+        --format="value(name)"
 ```
 
 ## 6. Central MLflow Tracking Server (Compute VM)
