@@ -29,4 +29,4 @@ EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
     CMD curl -f http://localhost:8080/health || exit 1
 
-CMD ["gunicorn", "src.api.predict:app", "--workers", "2", "--worker-class", "uvicorn.workers.UvicornWorker", "--bind", "0.0.0.0:8080", "--timeout", "120"]
+CMD ["uvicorn", "src.api.predict:app", "--host", "0.0.0.0", "--port", "8080"]
